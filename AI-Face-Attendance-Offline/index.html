@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart AI Face Attendance (Zero-Server)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Local face-api.js for full offline support -->
+  <script src="./face-api.js"></script>
+  <style>
+    #video-container { position: relative; width: 640px; height: 480px; }
+    #video, #overlay { position: absolute; top: 0; left: 0; width: 640px; height: 480px; border-radius: 0.75rem; }
+  </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen p-6 flex flex-col items-center">
+
+  <header class="text-center mb-6">
+    <h1 class="text-3xl font-bold text-indigo-400">AI Face Recognition & Attendance</h1>
+    <p class="text-slate-400 text-sm">Adaptive Dynamic Liveness & Zero-Server Verification</p>
+  </header>
+
+  <main class="flex flex-col lg:flex-row gap-8 max-w-6xl w-full">
+    
+    <!-- Camera Viewport & Challenge Controls -->
+    <div class="flex-1 flex flex-col items-center bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-700">
+      
+      <!-- Video Frame with Canvas Overlay -->
+      <div id="video-container" class="bg-black rounded-xl overflow-hidden shadow-inner border border-slate-600">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <!-- Real-time Status / Challenge Indicator -->
+      <div id="challenge-box" class="w-full mt-4 p-4 rounded-xl bg-slate-700/60 border border-slate-600 text-center">
+        <span id="system-status" class="text-yellow-400 font-semibold text-lg">⏳ Loading Neural Network Models...</span>
+        <p id="challenge-instructions" class="text-slate-300 text-sm mt-1">Please allow camera access.</p>
+        
+        <!-- Visual Progress Bar for Liveness -->
+        <div id="progress-container" class="w-full bg-slate-600 h-3 rounded-full mt-3 overflow-hidden hidden">
+          <div id="progress-bar" class="bg-indigo-500 h-full w-0 transition-all duration-150"></div>
+        </div>
+        <p id="metric-feedback" class="text-xs text-indigo-300 mt-1 font-mono hidden"></p>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="flex gap-4 mt-4 w-full">
+        <button id="btn-mark" disabled onclick="startAttendanceFlow()" class="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-semibold rounded-xl transition">
+          Mark Attendance
+        </button>
+        <button id="btn-register" disabled onclick="toggleRegisterModal(true)" class="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-semibold rounded-xl transition">
+          Register New Face
+        </button>
+      </div>
+    </div>
+
+    <!-- Attendance History & User Management -->
+    <div class="w-full lg:w-96 flex flex-col gap-6">
+      
+      <!-- Attendance Records -->
+      <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700 flex-1">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="font-bold text-indigo-300">Today's Attendance</h2>
+          <button onclick="exportCSV()" class="text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-md">Export CSV</button>
+        </div>
+        <div class="overflow-y-auto max-h-56 space-y-2 pr-1" id="attendance-list">
+          <p class="text-slate-500 text-sm text-center py-4">No records for today yet.</p>
+        </div>
+      </div>
+
+      <!-- Registered Profiles -->
+      <div class="bg-slate-800 p-5 rounded-2xl border border-slate-700">
+        <h2 class="font-bold text-emerald-300 mb-3">Registered Users (<span id="user-count">0</span>)</h2>
+        <div class="overflow-y-auto max-h-40 space-y-2 pr-1" id="registered-users-list">
+          <p class="text-slate-500 text-sm text-center">No users registered.</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Registration Modal Dialog -->
+  <div id="register-modal" class="fixed inset-0 bg-black/70 flex items-center justify-center hidden z-50">
+    <div class="bg-slate-800 border border-slate-700 p-6 rounded-2xl max-w-sm w-full">
+      <h3 class="text-xl font-bold text-white mb-2">Register Face Profile</h3>
+      <p class="text-xs text-slate-400 mb-4">Position your face clearly towards the camera before clicking capture.</p>
+      
+      <input type="text" id="user-name" placeholder="Full Name (e.g. John Doe)" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white mb-3 focus:outline-none focus:border-indigo-500 text-sm" />
+      <input type="text" id="user-id" placeholder="Employee/Student ID" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white mb-4 focus:outline-none focus:border-indigo-500 text-sm" />
+
+      <div class="flex gap-3">
+        <button onclick="toggleRegisterModal(false)" class="flex-1 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">Cancel</button>
+        <button onclick="captureAndRegister()" class="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-semibold text-sm">Capture & Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Load models from local folder (fully offline after first download)
+    const MODEL_URL = './models/';
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const statusText = document.getElementById('system-status');
+    const instructionText = document.getElementById('challenge-instructions');
+    const progressBar = document.getElementById('progress-bar');
+    const progressContainer = document.getElementById('progress-container');
+    const metricFeedback = document.getElementById('metric-feedback');
+    const btnMark = document.getElementById('btn-mark');
+    const btnRegister = document.getElementById('btn-register');
+
+    let registeredProfiles = JSON.parse(localStorage.getItem('registered_profiles') || '[]');
+    let attendanceLogs = JSON.parse(localStorage.getItem('attendance_logs') || '[]');
+    
+    let activeChallenge = null;
+    let isVerifying = false;
+    let verificationTimer = null;
+    let baselineState = null;
+    let lastEyesClosed = false;
+    let blinkCounter = 0;
+
+    // 1. Initialize High-Performance Models
+    async function init() {
+      try {
+        statusText.innerText = "Loading AI Models...";
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
+
+        statusText.innerText = "Starting Camera...";
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, frameRate: { ideal: 30 } }
+        });
+        video.srcObject = stream;
+
+        video.addEventListener('loadeddata', () => {
+          overlay.width = 640;
+          overlay.height = 480;
+          statusText.innerText = "System Ready";
+          statusText.className = "text-emerald-400 font-semibold text-lg";
+          instructionText.innerText = "Click 'Mark Attendance' or 'Register Face'";
+          btnMark.disabled = false;
+          btnRegister.disabled = false;
+          updateUI();
+          runRealtimeTracking();
+        });
+
+      } catch (err) {
+        statusText.innerText = "Error: " + err.message;
+        statusText.className = "text-rose-500 font-semibold text-lg";
+      }
+    }
+
+    // 2. Real-time Detection Loop
+    async function runRealtimeTracking() {
+      const displaySize = { width: 640, height: 480 };
+      const ctx = overlay.getContext('2d');
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+
+      setInterval(async () => {
+        const detection = await faceapi.detectSingleFace(video, detectorOptions)
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+        if (detection) {
+          const resized = faceapi.resizeResults(detection, displaySize);
+          faceapi.draw.drawDetections(overlay, resized);
+
+          if (isVerifying && activeChallenge) {
+            handleAdaptiveLiveness(detection.landmarks, detection.descriptor);
+          }
+        }
+      }, 80);
+    }
+
+    // 3. Adaptive Liveness Engine
+    function handleAdaptiveLiveness(landmarks, descriptor) {
+      const p = landmarks.positions;
+
+      // Metric 1: Average EAR (Eye Aspect Ratio)
+      const leftEAR = calculateEAR(p[36], p[37], p[38], p[39], p[40], p[41]);
+      const rightEAR = calculateEAR(p[42], p[43], p[44], p[45], p[46], p[47]);
+      const currentEAR = (leftEAR + rightEAR) / 2;
+
+      // Metric 2: Mouth Stretch Ratio
+      const mouthWidth = getDistance(p[48], p[54]);
+      const faceWidth = getDistance(p[0], p[16]);
+      const currentSmileRatio = mouthWidth / faceWidth;
+
+      // Metric 3: Head Yaw Position (Nose horizontal position relative to jaw)
+      const noseX = p[30].x;
+      const leftJawX = p[0].x;
+      const rightJawX = p[16].x;
+      const currentYaw = (noseX - leftJawX) / (rightJawX - leftJawX);
+
+      // Calibrate baseline frame if just started
+      if (!baselineState) {
+        baselineState = {
+          ear: currentEAR,
+          smile: currentSmileRatio,
+          yaw: currentYaw
+        };
+        return;
+      }
+
+      progressContainer.classList.remove('hidden');
+      metricFeedback.classList.remove('hidden');
+
+      // Challenge A: Blink 1 time
+      if (activeChallenge === 'BLINK') {
+        metricFeedback.innerText = `Current EAR: ${currentEAR.toFixed(2)} (Baseline: ${baselineState.ear.toFixed(2)})`;
+        
+        // Eye is closed if EAR drops significantly from baseline
+        if (currentEAR < (baselineState.ear * 0.70) || currentEAR < 0.22) {
+          lastEyesClosed = true;
+          progressBar.style.width = '60%';
+        } else if (lastEyesClosed && currentEAR >= (baselineState.ear * 0.85)) {
+          // Eye closed and reopened -> Complete!
+          progressBar.style.width = '100%';
+          finalizeAttendance(descriptor, "Live Blink Verified");
+        }
+      }
+
+      // Challenge B: Smile
+      else if (activeChallenge === 'SMILE') {
+        const smileDelta = currentSmileRatio - baselineState.smile;
+        const percent = Math.min(Math.max((smileDelta / 0.04) * 100, 0), 100);
+        progressBar.style.width = `${percent}%`;
+        metricFeedback.innerText = `Smile expansion: ${(smileDelta * 100).toFixed(1)}% / Target: 4.0%`;
+
+        if (smileDelta >= 0.04 || currentSmileRatio > 0.44) {
+          finalizeAttendance(descriptor, "Live Smile Verified");
+        }
+      }
+
+      // Challenge C: Turn Head Left
+      else if (activeChallenge === 'HEAD_LEFT') {
+        const yawDelta = baselineState.yaw - currentYaw;
+        const percent = Math.min(Math.max((yawDelta / 0.12) * 100, 0), 100);
+        progressBar.style.width = `${percent}%`;
+        metricFeedback.innerText = `Turn Left Progress: ${percent.toFixed(0)}%`;
+
+        if (yawDelta >= 0.12 || currentYaw < 0.38) {
+          finalizeAttendance(descriptor, "Live Head Turn Verified");
+        }
+      }
+
+      // Challenge D: Turn Head Right
+      else if (activeChallenge === 'HEAD_RIGHT') {
+        const yawDelta = currentYaw - baselineState.yaw;
+        const percent = Math.min(Math.max((yawDelta / 0.12) * 100, 0), 100);
+        progressBar.style.width = `${percent}%`;
+        metricFeedback.innerText = `Turn Right Progress: ${percent.toFixed(0)}%`;
+
+        if (yawDelta >= 0.12 || currentYaw > 0.62) {
+          finalizeAttendance(descriptor, "Live Head Turn Verified");
+        }
+      }
+    }
+
+    function getDistance(p1, p2) {
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    }
+
+    function calculateEAR(p1, p2, p3, p4, p5, p6) {
+      const v1 = getDistance(p2, p6);
+      const v2 = getDistance(p3, p5);
+      const h = getDistance(p1, p4);
+      return (v1 + v2) / (2.0 * h);
+    }
+
+    // 4. Start Attendance Workflow
+    function startAttendanceFlow() {
+      if (registeredProfiles.length === 0) {
+        alert("Please register at least one face profile first!");
+        return;
+      }
+
+      // Reset state & baselines
+      baselineState = null;
+      lastEyesClosed = false;
+      blinkCounter = 0;
+      progressBar.style.width = '0%';
+      if (verificationTimer) clearTimeout(verificationTimer);
+
+      const challenges = [
+        { type: 'BLINK', text: 'Action Required: BLINK your eyes naturally.' },
+        { type: 'SMILE', text: 'Action Required: SMILE towards the camera.' },
+        { type: 'HEAD_LEFT', text: 'Action Required: Turn your head SLIGHTLY LEFT.' },
+        { type: 'HEAD_RIGHT', text: 'Action Required: Turn your head SLIGHTLY RIGHT.' }
+      ];
+
+      const selected = challenges[Math.floor(Math.random() * challenges.length)];
+      activeChallenge = selected.type;
+      isVerifying = true;
+
+      statusText.innerText = "Liveness Challenge Active";
+      statusText.className = "text-amber-400 font-semibold text-lg";
+      instructionText.innerText = selected.text;
+
+      // 12-second adaptive timeout window
+      verificationTimer = setTimeout(() => {
+        if (isVerifying) {
+          resetVerificationState("Verification Timed Out. Please perform the action clearly.");
+        }
+      }, 12000);
+    }
+
+    // 5. Finalize Biometric Match & Record
+    function finalizeAttendance(currentDescriptor, livenessProof) {
+      // Clear timeout immediately upon challenge success
+      if (verificationTimer) clearTimeout(verificationTimer);
+      isVerifying = false;
+      activeChallenge = null;
+
+      // Build FaceMatcher with recommended 0.60 threshold
+      const labeledDescriptors = registeredProfiles.map(p => {
+        return new faceapi.LabeledFaceDescriptors(
+          `${p.name}|${p.id}`,
+          [new Float32Array(p.descriptor)]
+        );
+      });
+
+      const matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.60);
+      const bestMatch = matcher.findBestMatch(currentDescriptor);
+
+      hideMetrics();
+
+      if (bestMatch.label !== 'unknown') {
+        const [name, id] = bestMatch.label.split('|');
+        const timestamp = new Date().toLocaleTimeString();
+        const date = new Date().toLocaleDateString();
+
+        const log = { id, name, date, timestamp, method: livenessProof, distance: bestMatch.distance.toFixed(3) };
+        attendanceLogs.unshift(log);
+        localStorage.setItem('attendance_logs', JSON.stringify(attendanceLogs));
+
+        statusText.innerText = `Verified: ${name}!`;
+        statusText.className = "text-emerald-400 font-bold text-lg";
+        instructionText.innerText = `Attendance Marked at ${timestamp} (Match Score: ${(1 - bestMatch.distance).toFixed(2)})`;
+        updateUI();
+      } else {
+        resetVerificationState("Liveness passed, but face does not match registered profiles.");
+      }
+    }
+
+    function resetVerificationState(msg) {
+      if (verificationTimer) clearTimeout(verificationTimer);
+      isVerifying = false;
+      activeChallenge = null;
+      hideMetrics();
+      statusText.innerText = "Verification Failed";
+      statusText.className = "text-rose-400 font-semibold text-lg";
+      instructionText.innerText = msg;
+    }
+
+    function hideMetrics() {
+      progressContainer.classList.add('hidden');
+      metricFeedback.classList.add('hidden');
+      progressBar.style.width = '0%';
+    }
+
+    // 6. Registration
+    async function captureAndRegister() {
+      const name = document.getElementById('user-name').value.trim();
+      const id = document.getElementById('user-id').value.trim();
+
+      if (!name || !id) {
+        alert("Please enter Name and ID.");
+        return;
+      }
+
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+      const detection = await faceapi.detectSingleFace(video, detectorOptions)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        alert("No face detected! Look directly at the camera with clear lighting.");
+        return;
+      }
+
+      const profile = {
+        id,
+        name,
+        descriptor: Array.from(detection.descriptor),
+        registeredAt: new Date().toISOString()
+      };
+
+      registeredProfiles.push(profile);
+      localStorage.setItem('registered_profiles', JSON.stringify(registeredProfiles));
+
+      toggleRegisterModal(false);
+      document.getElementById('user-name').value = '';
+      document.getElementById('user-id').value = '';
+      updateUI();
+      alert(`User ${name} registered successfully!`);
+    }
+
+    function toggleRegisterModal(show) {
+      document.getElementById('register-modal').classList.toggle('hidden', !show);
+    }
+
+    function updateUI() {
+      document.getElementById('user-count').innerText = registeredProfiles.length;
+      const usersEl = document.getElementById('registered-users-list');
+      if (registeredProfiles.length === 0) {
+        usersEl.innerHTML = `<p class="text-slate-500 text-sm text-center">No users registered.</p>`;
+      } else {
+        usersEl.innerHTML = registeredProfiles.map(u => `
+          <div class="flex justify-between items-center bg-slate-700/50 p-2 rounded-lg text-xs">
+            <span class="font-medium">${u.name} <span class="text-slate-400">(${u.id})</span></span>
+            <button onclick="deleteProfile('${u.id}')" class="text-rose-400 hover:text-rose-300">Remove</button>
+          </div>
+        `).join('');
+      }
+
+      const logsEl = document.getElementById('attendance-list');
+      if (attendanceLogs.length === 0) {
+        logsEl.innerHTML = `<p class="text-slate-500 text-sm text-center py-4">No records for today yet.</p>`;
+      } else {
+        logsEl.innerHTML = attendanceLogs.map(l => `
+          <div class="bg-slate-700/40 border border-slate-600/40 p-2.5 rounded-lg text-xs flex justify-between items-center">
+            <div>
+              <p class="font-bold text-slate-200">${l.name} <span class="text-slate-400 font-normal">#${l.id}</span></p>
+              <p class="text-indigo-400 text-[10px]">${l.method}</p>
+            </div>
+            <span class="font-mono text-slate-300">${l.timestamp}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    function deleteProfile(id) {
+      registeredProfiles = registeredProfiles.filter(p => p.id !== id);
+      localStorage.setItem('registered_profiles', JSON.stringify(registeredProfiles));
+      updateUI();
+    }
+
+    function exportCSV() {
+      if (attendanceLogs.length === 0) return alert("No logs to export");
+      let csv = "ID,Name,Date,Timestamp,Verification Method,Match Distance\n";
+      attendanceLogs.forEach(l => {
+        csv += `"${l.id}","${l.name}","${l.date}","${l.timestamp}","${l.method}","${l.distance}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      a.setAttribute('download', `Attendance_${new Date().toISOString().slice(0,10)}.csv`);
+      a.click();
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Online Exam Proctoring & Attendance</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Local face-api.js -->
+  <script src="./face-api.js"></script>
+  <style>
+    #video-container { position: relative; width: 640px; height: 480px; }
+    #video, #overlay { position: absolute; top: 0; left: 0; width: 640px; height: 480px; border-radius: 0.75rem; }
+    
+    /* Flashing violation frame */
+    .violation-border {
+      border: 4px solid #ef4444 !important;
+      box-shadow: 0 0 25px rgba(239, 68, 68, 0.75);
+      animation: pulseBorder 0.8s infinite alternate;
+    }
+    @keyframes pulseBorder {
+      0% { border-color: #ef4444; }
+      100% { border-color: #b91c1c; }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-4 lg:p-6 flex flex-col items-center">
+
+  <!-- Header -->
+  <header class="text-center mb-5 max-w-4xl w-full flex flex-col sm:flex-row justify-between items-center border-b border-slate-800 pb-4">
+    <div>
+      <h1 class="text-2xl lg:text-3xl font-extrabold text-indigo-400 tracking-tight">AI Exam Proctor & Attendance</h1>
+      <p class="text-xs lg:text-sm text-slate-400 mt-1">Autonomous Multi-Face & Talking Detection Engine</p>
+    </div>
+    <div class="flex items-center gap-2 mt-3 sm:mt-0">
+      <span id="proctor-badge" class="px-3 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+        System Initializing
+      </span>
+    </div>
+  </header>
+
+  <main class="flex flex-col lg:flex-row gap-6 max-w-6xl w-full">
+    
+    <!-- Left Column: Camera Feed & Real-time Alerts -->
+    <div class="flex-1 flex flex-col items-center bg-slate-900 p-5 rounded-2xl shadow-2xl border border-slate-800">
+      
+      <!-- Video Viewport -->
+      <div id="video-container" class="bg-black rounded-xl overflow-hidden shadow-inner border-2 border-slate-700 transition-all duration-200">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        
+        <!-- Live Proctor Banner (Appears on violation) -->
+        <div id="alert-banner" class="absolute top-3 left-3 right-3 py-2.5 px-4 rounded-lg bg-rose-600/90 text-white font-bold text-center text-sm shadow-lg hidden backdrop-blur-sm z-30 transition-all">
+          <span id="alert-message">ALERT: Violation Detected</span>
+        </div>
+      </div>
+
+      <!-- Real-time Exam Indicators -->
+      <div class="grid grid-cols-3 gap-3 w-full mt-4 text-center">
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+          <p class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Faces Detected</p>
+          <p id="stat-face-count" class="text-lg font-bold text-slate-300 mt-0.5">0</p>
+        </div>
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+          <p class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Talking Status</p>
+          <p id="stat-talk" class="text-lg font-bold text-emerald-400 mt-0.5">Silent</p>
+        </div>
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+          <p class="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Natural Movement</p>
+          <p id="stat-movement" class="text-lg font-bold text-slate-300 mt-0.5">Checking...</p>
+        </div>
+      </div>
+
+      <!-- Control Buttons -->
+      <div class="flex gap-3 mt-4 w-full">
+        <button id="btn-toggle-exam" disabled onclick="toggleExamMonitoring()" class="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 font-bold rounded-xl transition text-sm">
+          Start Exam Monitoring
+        </button>
+        <button id="btn-register" disabled onclick="toggleRegisterModal(true)" class="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-bold rounded-xl transition text-sm">
+          Register Student Face
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Column: Verification & Proctoring Violation Log -->
+    <div class="w-full lg:w-96 flex flex-col gap-5">
+      
+      <!-- Verified Student Info -->
+      <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800">
+        <h2 class="font-bold text-indigo-300 text-sm mb-2 uppercase tracking-wide">Candidate Identity</h2>
+        <div id="candidate-info" class="bg-slate-800/60 p-3 rounded-xl border border-slate-700/60 text-sm">
+          <p class="text-slate-400">Status: <span id="candidate-status" class="text-yellow-400 font-semibold">No Candidate Verified</span></p>
+          <p class="text-slate-400 text-xs mt-1">ID: <span id="candidate-id" class="text-slate-200">-</span></p>
+        </div>
+      </div>
+
+      <!-- Proctoring Violations & Attendance Records -->
+      <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 flex-1 flex flex-col">
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="font-bold text-rose-400 text-sm uppercase tracking-wide">Exam Incident Log (<span id="incident-count">0</span>)</h2>
+          <button onclick="exportCSV()" class="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 rounded-md text-slate-300">
+            Export Report
+          </button>
+        </div>
+        <div class="overflow-y-auto max-h-64 space-y-2 pr-1 flex-1 font-mono text-xs" id="proctor-log">
+          <p class="text-slate-500 text-center py-6 font-sans">No exam incidents recorded.</p>
+        </div>
+      </div>
+
+      <!-- Registered Profiles Mini-list -->
+      <div class="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Registered Students (<span id="student-count">0</span>)</h3>
+        <div id="registered-list" class="max-h-24 overflow-y-auto space-y-1.5 text-xs text-slate-300">
+          <p class="text-slate-500">None registered.</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Registration Modal -->
+  <div id="register-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center hidden z-50 p-4">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full shadow-2xl">
+      <h3 class="text-lg font-bold text-white mb-1">Register Exam Candidate</h3>
+      <p class="text-xs text-slate-400 mb-4">Ensure only one person is facing the camera clearly.</p>
+      
+      <input type="text" id="user-name" placeholder="Candidate Full Name" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white mb-2.5 focus:outline-none focus:border-indigo-500 text-sm" />
+      <input type="text" id="user-id" placeholder="Roll Number / Student ID" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white mb-4 focus:outline-none focus:border-indigo-500 text-sm" />
+
+      <div class="flex gap-2.5">
+        <button onclick="toggleRegisterModal(false)" class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-slate-300">Cancel</button>
+        <button onclick="captureAndRegister()" class="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-semibold text-sm text-white">Capture Face</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const MODEL_URL = './models/';
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const videoContainer = document.getElementById('video-container');
+    const alertBanner = document.getElementById('alert-banner');
+    const alertMessage = document.getElementById('alert-message');
+    const proctorBadge = document.getElementById('proctor-badge');
+    const btnToggleExam = document.getElementById('btn-toggle-exam');
+    const btnRegister = document.getElementById('btn-register');
+
+    const statFaceCount = document.getElementById('stat-face-count');
+    const statTalk = document.getElementById('stat-talk');
+    const statMovement = document.getElementById('stat-movement');
+    const candidateStatus = document.getElementById('candidate-status');
+    const candidateId = document.getElementById('candidate-id');
+    const proctorLogEl = document.getElementById('proctor-log');
+    const incidentCountEl = document.getElementById('incident-count');
+
+    let registeredProfiles = JSON.parse(localStorage.getItem('registered_profiles') || '[]');
+    let incidents = [];
+    let isExamActive = false;
+    let faceMatcher = null;
+
+    // Movement History Buffer (to detect static pictures)
+    const movementBuffer = [];
+    const BUFFER_LIMIT = 25;
+
+    // Talking History Buffer (consecutive speech frames)
+    let talkingStreak = 0;
+    let lastSpokenIncidentTime = 0;
+    let lastMultiFaceIncidentTime = 0;
+
+    // 1. Initialize Face-API Models and Camera
+    async function init() {
+      try {
+        proctorBadge.innerText = "Loading AI Models...";
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
+
+        proctorBadge.innerText = "Starting Camera...";
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, frameRate: { ideal: 30 } }
+        });
+        video.srcObject = stream;
+
+        video.addEventListener('loadeddata', () => {
+          overlay.width = 640;
+          overlay.height = 480;
+          proctorBadge.innerText = "System Ready";
+          proctorBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800";
+          btnToggleExam.disabled = false;
+          btnRegister.disabled = false;
+          rebuildMatcher();
+          updateUI();
+          startProctoringLoop();
+        });
+
+      } catch (err) {
+        proctorBadge.innerText = "Error Loading Models";
+        proctorBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-rose-950 text-rose-400 border border-rose-800";
+        alert("Camera or Model Error: " + err.message);
+      }
+    }
+
+    function rebuildMatcher() {
+      if (registeredProfiles.length > 0) {
+        const labeledDescriptors = registeredProfiles.map(p => {
+          return new faceapi.LabeledFaceDescriptors(
+            `${p.name}|${p.id}`,
+            [new Float32Array(p.descriptor)]
+          );
+        });
+        faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.58);
+      } else {
+        faceMatcher = null;
+      }
+    }
+
+    function toggleExamMonitoring() {
+      isExamActive = !isExamActive;
+      if (isExamActive) {
+        btnToggleExam.innerText = "Stop Exam Monitoring";
+        btnToggleExam.className = "flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-500 font-bold rounded-xl transition text-sm";
+        proctorBadge.innerText = "Exam In Progress";
+        proctorBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-rose-950 text-rose-300 border border-rose-800 animate-pulse";
+        addIncident("SYSTEM", "Exam monitoring started");
+      } else {
+        btnToggleExam.innerText = "Start Exam Monitoring";
+        btnToggleExam.className = "flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 font-bold rounded-xl transition text-sm";
+        proctorBadge.innerText = "Exam Stopped";
+        proctorBadge.className = "px-3 py-1 text-xs font-semibold rounded-full bg-slate-800 text-slate-300 border border-slate-700";
+        clearAlert();
+      }
+    }
+
+    // 2. Real-time Proctoring Loop
+    async function startProctoringLoop() {
+      const displaySize = { width: 640, height: 480 };
+      const ctx = overlay.getContext('2d');
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+
+      setInterval(async () => {
+        // Detect ALL faces in frame
+        const detections = await faceapi.detectAllFaces(video, detectorOptions)
+          .withFaceLandmarks()
+          .withFaceDescriptors();
+
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        statFaceCount.innerText = detections.length;
+
+        if (!isExamActive) {
+          // If exam isn't actively running, simply draw detected face bounding boxes
+          const resized = faceapi.resizeResults(detections, displaySize);
+          faceapi.draw.drawDetections(overlay, resized);
+          return;
+        }
+
+        const now = Date.now();
+        let currentAlert = null;
+
+        // RULE 1: MULTIPLE FACES DETECTED
+        if (detections.length > 1) {
+          currentAlert = "ALERT: Someone else is available in the room! Multiple faces detected.";
+          if (now - lastMultiFaceIncidentTime > 4000) {
+            addIncident("MULTIPLE_FACES", `${detections.length} faces visible in camera`);
+            lastMultiFaceIncidentTime = now;
+          }
+        } 
+        // RULE 2: NO FACE DETECTED
+        else if (detections.length === 0) {
+          currentAlert = "WARNING: No face detected! Stay in front of camera.";
+          statTalk.innerText = "None";
+          statTalk.className = "text-lg font-bold text-slate-400 mt-0.5";
+          statMovement.innerText = "No Face";
+          statMovement.className = "text-lg font-bold text-slate-400 mt-0.5";
+        } 
+        // RULE 3: EXACTLY ONE CANDIDATE - ANALYZE BEHAVIOR AUTONOMOUSLY
+        else {
+          const det = detections[0];
+          const landmarks = det.landmarks;
+          const descriptor = det.descriptor;
+
+          // Autonomous Match Verification
+          if (faceMatcher) {
+            const bestMatch = faceMatcher.findBestMatch(descriptor);
+            if (bestMatch.label !== 'unknown') {
+              const [name, id] = bestMatch.label.split('|');
+              candidateStatus.innerText = `Verified: ${name}`;
+              candidateStatus.className = "text-emerald-400 font-bold";
+              candidateId.innerText = id;
+            } else {
+              candidateStatus.innerText = "Unregistered Candidate";
+              candidateStatus.className = "text-rose-400 font-bold";
+              currentAlert = "WARNING: Unrecognized person in front of screen!";
+            }
+          }
+
+          // A) AUTONOMOUS TALKING DETECTION (Inner lip distance / Mouth Aspect Ratio)
+          const isTalking = checkTalking(landmarks);
+          if (isTalking) {
+            talkingStreak++;
+            statTalk.innerText = "TALKING!";
+            statTalk.className = "text-lg font-bold text-rose-500 mt-0.5 animate-pulse";
+            
+            // If talking continuously for over ~0.6 seconds (approx 6 frames)
+            if (talkingStreak >= 6) {
+              currentAlert = "ALERT: Do not talk! Speech / mouth movement detected.";
+              if (now - lastSpokenIncidentTime > 5000) {
+                addIncident("TALKING", "Candidate was speaking during exam");
+                lastSpokenIncidentTime = now;
+              }
+            }
+          } else {
+            talkingStreak = Math.max(0, talkingStreak - 1);
+            statTalk.innerText = "Silent";
+            statTalk.className = "text-lg font-bold text-emerald-400 mt-0.5";
+          }
+
+          // B) PASSIVE MOVEMENT MONITORING (Autonomous Spoof / Photo Check)
+          const isNaturallyMoving = checkPassiveMovement(landmarks);
+          if (!isNaturallyMoving) {
+            statMovement.innerText = "Static / Still";
+            statMovement.className = "text-lg font-bold text-amber-400 mt-0.5";
+            if (movementBuffer.length >= BUFFER_LIMIT) {
+              currentAlert = "WARNING: No natural movement detected (Static picture suspected).";
+            }
+          } else {
+            statMovement.innerText = "Active / Live";
+            statMovement.className = "text-lg font-bold text-emerald-400 mt-0.5";
+          }
+        }
+
+        // Draw custom bounding boxes
+        detections.forEach(det => {
+          const box = det.detection.box;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = detections.length > 1 ? '#ef4444' : '#10b981';
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+        });
+
+        // Trigger or Clear Visual Alert
+        if (currentAlert) {
+          showAlert(currentAlert);
+        } else {
+          clearAlert();
+        }
+
+      }, 100);
+    }
+
+    // 3. Autonomous Talking Check (Using inner/outer lip ratio)
+    function checkTalking(landmarks) {
+      const p = landmarks.positions;
+      // Mouth corners: 48, 54
+      const mouthWidth = Math.hypot(p[48].x - p[54].x, p[48].y - p[54].y);
+      // Inner lips: 62 (top), 66 (bottom)
+      const innerMouthHeight = Math.hypot(p[62].x - p[66].x, p[62].y - p[66].y);
+      // Outer lips: 51 (top), 57 (bottom)
+      const outerMouthHeight = Math.hypot(p[51].x - p[57].x, p[51].y - p[57].y);
+
+      const lipRatio = innerMouthHeight / mouthWidth;
+      const outerRatio = outerMouthHeight / mouthWidth;
+
+      // Threshold: When opening mouth to speak, inner ratio opens significantly (>0.15)
+      // or outer vertical ratio expands beyond normal resting state (>0.38)
+      return lipRatio > 0.14 || outerRatio > 0.39;
+    }
+
+    // 4. Autonomous Natural Movement (No prompts needed)
+    function checkPassiveMovement(landmarks) {
+      const noseTip = landmarks.positions[30];
+      movementBuffer.push({ x: noseTip.x, y: noseTip.y });
+
+      if (movementBuffer.length > BUFFER_LIMIT) {
+        movementBuffer.shift();
+      }
+
+      if (movementBuffer.length < BUFFER_LIMIT) {
+        return true; // Gathering baseline
+      }
+
+      // Compute variance of nose coordinates across past frames
+      let sumX = 0, sumY = 0;
+      movementBuffer.forEach(pt => { sumX += pt.x; sumY += pt.y; });
+      const avgX = sumX / movementBuffer.length;
+      const avgY = sumY / movementBuffer.length;
+
+      const variance = movementBuffer.reduce((acc, pt) => {
+        return acc + Math.hypot(pt.x - avgX, pt.y - avgY);
+      }, 0) / movementBuffer.length;
+
+      // Human faces have natural micro-jitter/breathing (variance between 0.35 and 20px)
+      // A static paper/screen photo taped to camera has variance close to 0.05
+      return variance > 0.30;
+    }
+
+    // 5. Alert & Violation Handling
+    function showAlert(msg) {
+      alertBanner.classList.remove('hidden');
+      alertMessage.innerText = msg;
+      videoContainer.classList.add('violation-border');
+    }
+
+    function clearAlert() {
+      alertBanner.classList.add('hidden');
+      videoContainer.classList.remove('violation-border');
+    }
+
+    function addIncident(type, detail) {
+      const time = new Date().toLocaleTimeString();
+      const incident = { type, detail, time };
+      incidents.unshift(incident);
+
+      incidentCountEl.innerText = incidents.length;
+      renderIncidents();
+    }
+
+    function renderIncidents() {
+      if (incidents.length === 0) {
+        proctorLogEl.innerHTML = `<p class="text-slate-500 text-center py-6 font-sans">No incidents recorded.</p>`;
+        return;
+      }
+
+      proctorLogEl.innerHTML = incidents.map(item => `
+        <div class="bg-slate-800/80 border ${item.type === 'MULTIPLE_FACES' || item.type === 'TALKING' ? 'border-rose-500/50 bg-rose-950/20' : 'border-slate-700'} p-2 rounded-lg">
+          <div class="flex justify-between items-center">
+            <span class="font-bold ${item.type === 'MULTIPLE_FACES' || item.type === 'TALKING' ? 'text-rose-400' : 'text-indigo-300'}">${item.type}</span>
+            <span class="text-slate-400 text-[10px]">${item.time}</span>
+          </div>
+          <p class="text-slate-300 text-[11px] mt-0.5">${item.detail}</p>
+        </div>
+      `).join('');
+    }
+
+    // 6. Registration Flow
+    async function captureAndRegister() {
+      const name = document.getElementById('user-name').value.trim();
+      const id = document.getElementById('user-id').value.trim();
+
+      if (!name || !id) {
+        alert("Please enter Candidate Name and Roll Number.");
+        return;
+      }
+
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+      const detections = await faceapi.detectAllFaces(video, detectorOptions)
+        .withFaceLandmarks()
+        .withFaceDescriptors();
+
+      if (detections.length === 0) {
+        alert("No face detected! Look straight into camera.");
+        return;
+      }
+      if (detections.length > 1) {
+        alert("More than one person detected! Only the candidate should be in the camera frame.");
+        return;
+      }
+
+      const profile = {
+        id,
+        name,
+        descriptor: Array.from(detections[0].descriptor),
+        registeredAt: new Date().toISOString()
+      };
+
+      registeredProfiles.push(profile);
+      localStorage.setItem('registered_profiles', JSON.stringify(registeredProfiles));
+
+      toggleRegisterModal(false);
+      document.getElementById('user-name').value = '';
+      document.getElementById('user-id').value = '';
+      rebuildMatcher();
+      updateUI();
+      alert(`Candidate ${name} (${id}) registered successfully!`);
+    }
+
+    function toggleRegisterModal(show) {
+      document.getElementById('register-modal').classList.toggle('hidden', !show);
+    }
+
+    function updateUI() {
+      document.getElementById('student-count').innerText = registeredProfiles.length;
+      const listEl = document.getElementById('registered-list');
+      if (registeredProfiles.length === 0) {
+        listEl.innerHTML = `<p class="text-slate-500">None registered.</p>`;
+      } else {
+        listEl.innerHTML = registeredProfiles.map(u => `
+          <div class="flex justify-between items-center bg-slate-800 px-2 py-1.5 rounded">
+            <span>${u.name} <span class="text-slate-400">(${u.id})</span></span>
+            <button onclick="deleteProfile('${u.id}')" class="text-rose-400 hover:text-rose-300 text-[11px]">Delete</button>
+          </div>
+        `).join('');
+      }
+    }
+
+    function deleteProfile(id) {
+      registeredProfiles = registeredProfiles.filter(p => p.id !== id);
+      localStorage.setItem('registered_profiles', JSON.stringify(registeredProfiles));
+      rebuildMatcher();
+      updateUI();
+    }
+
+    function exportCSV() {
+      if (incidents.length === 0) {
+        alert("No incidents to export.");
+        return;
+      }
+      let csv = "Time,Incident Type,Details\n";
+      incidents.forEach(item => {
+        csv += `"${item.time}","${item.type}","${item.detail}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      a.setAttribute('download', `Exam_Proctor_Log_${new Date().toISOString().slice(0, 10)}.csv`);
+      a.click();
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

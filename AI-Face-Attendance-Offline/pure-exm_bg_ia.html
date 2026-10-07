@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Online Examination Portal - Secure Test Environment</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Local face-api.js for offline background proctoring -->
+  <script src="./face-api.js"></script>
+  <style>
+    /* Strict text selection prevention */
+    *, html, body {
+      -webkit-user-select: none !important;
+      -moz-user-select: none !important;
+      -ms-user-select: none !important;
+      user-select: none !important;
+    }
+    /* Blank out print preview if screenshot/print is attempted */
+    @media print {
+      body { display: none !important; }
+    }
+    /* Blackout overlay on screenshot attempts */
+    #anti-screenshot-veil {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 99999;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans select-none">
+
+  <!-- Blackout Screen on PrintScreen attempt -->
+  <div id="anti-screenshot-veil"></div>
+
+  <!-- Hidden Video and Canvas Elements (Zero-Display Stealth Proctoring) -->
+  <video id="video" autoplay muted playsinline class="hidden"></video>
+  <canvas id="overlay" class="hidden"></canvas>
+
+  <!-- Top Examination Bar -->
+  <header class="bg-slate-900 border-b border-slate-800 px-6 py-3.5 flex justify-between items-center shadow-md">
+    <div class="flex items-center gap-4">
+      <div class="h-9 w-9 rounded-lg bg-indigo-600 flex items-center justify-center font-black text-lg text-white">
+        EX
+      </div>
+      <div>
+        <h1 class="text-sm font-bold text-white tracking-wide">Semester Final Assessment</h1>
+        <p class="text-xs text-slate-400">Course Code: CS-402 &bull; Duration: 60 Mins</p>
+      </div>
+    </div>
+
+    <!-- Candidate Profile & Live Warning Strikes -->
+    <div class="flex items-center gap-6">
+      <div class="text-right">
+        <p class="text-xs text-slate-400">Candidate:</p>
+        <p id="disp-student-name" class="text-sm font-bold text-indigo-300">Loading Candidate...</p>
+        <p id="disp-student-id" class="text-[11px] text-slate-400 font-mono">ID: -</p>
+      </div>
+
+      <!-- Strike Counter Badge -->
+      <div class="bg-slate-800 border border-slate-700 px-3.5 py-1.5 rounded-xl flex items-center gap-2">
+        <span class="text-xs text-slate-400 font-medium">Warning Strikes:</span>
+        <span id="strike-badge" class="text-sm font-extrabold text-emerald-400 font-mono">0 / 3</span>
+      </div>
+
+      <!-- Exam Timer -->
+      <div class="bg-indigo-950/60 border border-indigo-800/80 px-4 py-1.5 rounded-xl text-center">
+        <span class="text-[10px] text-indigo-300 uppercase tracking-widest font-bold block">Time Left</span>
+        <span id="exam-timer" class="text-base font-extrabold text-white font-mono">45:00</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Exam Interface -->
+  <main class="flex-1 max-w-6xl w-full mx-auto p-6 flex flex-col lg:flex-row gap-6">
+    
+    <!-- Question Paper Panel -->
+    <section class="flex-1 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+      <div>
+        <!-- Question Meta -->
+        <div class="flex justify-between items-center border-b border-slate-800 pb-3 mb-5">
+          <span class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Question 03 of 10</span>
+          <span class="text-xs bg-slate-800 px-2.5 py-1 rounded-md text-slate-300 font-semibold">Single Choice (+4 / -1)</span>
+        </div>
+
+        <!-- Question Body -->
+        <div class="space-y-4">
+          <h2 class="text-base lg:text-lg font-semibold text-slate-100 leading-relaxed">
+            Which data structure organizes items in a Last-In, First-Out (LIFO) order, and which operation is typically used to remove an element from it?
+          </h2>
+
+          <!-- Options -->
+          <div class="space-y-2.5 pt-3">
+            <label class="flex items-center gap-3 p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-800 cursor-pointer transition">
+              <input type="radio" name="exam-opt" class="accent-indigo-500 w-4 h-4">
+              <span class="text-sm text-slate-200">A) Queue &bull; dequeue()</span>
+            </label>
+            <label class="flex items-center gap-3 p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-800 cursor-pointer transition">
+              <input type="radio" name="exam-opt" class="accent-indigo-500 w-4 h-4">
+              <span class="text-sm text-slate-200">B) Stack &bull; pop()</span>
+            </label>
+            <label class="flex items-center gap-3 p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-800 cursor-pointer transition">
+              <input type="radio" name="exam-opt" class="accent-indigo-500 w-4 h-4">
+              <span class="text-sm text-slate-200">C) Array &bull; slice()</span>
+            </label>
+            <label class="flex items-center gap-3 p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 hover:bg-slate-800 cursor-pointer transition">
+              <input type="radio" name="exam-opt" class="accent-indigo-500 w-4 h-4">
+              <span class="text-sm text-slate-200">D) Binary Tree &bull; prune()</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Navigation -->
+      <div class="flex justify-between items-center pt-6 border-t border-slate-800 mt-6">
+        <button class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition">Previous</button>
+        <div class="flex gap-3">
+          <button class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-sm font-semibold transition">Review Later</button>
+          <button class="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold shadow-lg shadow-indigo-600/30 transition">Save & Next</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sidebar: Examination Rules & Integrity Policy -->
+    <aside class="w-full lg:w-80 flex flex-col gap-5">
+      
+      <!-- Instructions Box -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Exam Integrity Guidelines</h3>
+        <ul class="text-xs text-slate-300 space-y-2.5 list-disc list-inside leading-relaxed">
+          <li>Keep your eyes centered on the computer monitor at all times.</li>
+          <li><span class="text-amber-400 font-semibold">No lap notes, phones, or reference books</span> permitted.</li>
+          <li>Absolute silence is mandatory; whispering or talking is flagged.</li>
+          <li>Ensure nobody else enters your examination room.</li>
+          <li><span class="text-rose-400 font-semibold">Tab switching, closing, or copying text</span> results in immediate cancellation.</li>
+        </ul>
+      </div>
+
+      <!-- Security Notice -->
+      <div class="bg-indigo-950/30 border border-indigo-900/60 rounded-2xl p-5 text-center">
+        <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 mx-auto mb-2 animate-pulse"></div>
+        <p class="text-xs font-bold text-indigo-300">Continuous Proctoring Enabled</p>
+        <p class="text-[11px] text-slate-400 mt-1">Biometric presence and acoustic monitoring are actively protecting this assessment session.</p>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- VIOLATION POPUP MODAL -->
+  <div id="violation-modal" class="fixed inset-0 bg-black/85 flex items-center justify-center hidden z-50 p-4 backdrop-blur-sm">
+    <div class="bg-slate-900 border-2 border-rose-600 p-6 rounded-2xl max-w-md w-full shadow-2xl text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-600/20 text-rose-500 flex items-center justify-center mx-auto text-2xl font-black mb-3">
+        !
+      </div>
+      <h3 class="text-lg font-bold text-white mb-1">PROCTORING WARNING</h3>
+      <p id="violation-text" class="text-sm text-rose-300 font-semibold mb-3">Suspicious activity detected.</p>
+      <p class="text-xs text-slate-400 mb-5">Do not repeat this action. Reaching 3 strikes will immediately terminate and void your examination.</p>
+      <button onclick="dismissViolationModal()" class="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 font-bold text-white text-sm transition">
+        I Understand & Resume Exam
+      </button>
+    </div>
+  </div>
+
+  <!-- EXAM TERMINATED LOCKOUT SCREEN -->
+  <div id="termination-screen" class="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center hidden z-[100] p-6 text-center">
+    <div class="w-20 h-20 rounded-full bg-rose-950 border border-rose-700 flex items-center justify-center text-4xl mb-4">
+      🚫
+    </div>
+    <h2 class="text-3xl font-black text-rose-500 tracking-tight">EXAM TERMINATED</h2>
+    <p class="text-slate-300 max-w-md mt-2 text-sm">
+      Your examination session has been suspended due to repeated severe violations of the test integrity policies.
+    </p>
+    <div id="termination-reasons" class="bg-slate-900 border border-slate-800 p-4 rounded-xl text-left text-xs font-mono text-slate-400 max-w-md w-full mt-4 space-y-1">
+      <!-- Injected incident summaries -->
+    </div>
+    <p class="text-[11px] text-slate-500 mt-6">Your incident report has been securely saved and submitted to the examination board.</p>
+  </div>
+
+  <script>
+    // Config & References
+    const MODEL_URL = './models/';
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const dispName = document.getElementById('disp-student-name');
+    const dispId = document.getElementById('disp-student-id');
+    const strikeBadge = document.getElementById('strike-badge');
+    const violationModal = document.getElementById('violation-modal');
+    const violationText = document.getElementById('violation-text');
+    const terminationScreen = document.getElementById('termination-screen');
+    const terminationReasons = document.getElementById('termination-reasons');
+    const veil = document.getElementById('anti-screenshot-veil');
+
+    let strikes = 0;
+    const MAX_STRIKES = 3;
+    let incidentList = [];
+    let isTerminated = false;
+
+    // Load registered candidate data from localStorage
+    const registeredProfiles = JSON.parse(localStorage.getItem('registered_profiles') || '[]');
+    let currentStudent = registeredProfiles[0] || { name: "Candidate Student", id: "STU-2024-991" };
+    
+    dispName.innerText = currentStudent.name;
+    dispId.innerText = `ID: ${currentStudent.id}`;
+
+    // Background Lip & Pose Trackers
+    let prevLipDistance = null;
+    const lipVelocityHistory = [];
+    let whisperStreak = 0;
+
+    let baselinePitch = null;
+    let calibrationFrames = [];
+    let lookingDownFrames = 0;
+    let recentDownGlances = [];
+    let noFaceCounter = 0;
+
+    // Web Audio Analyser for whisper detection
+    let audioContext = null;
+    let audioAnalyser = null;
+    let audioDataArray = null;
+    let currentAudioVolume = 0;
+
+    // Cooldown timers
+    let lastViolationTime = 0;
+
+    // ==========================================
+    // 1. STRICT CLIENT-SIDE LOCKDOWN POLICIES
+    // ==========================================
+
+    // A) Block Right Click Context Menu
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      triggerStrike("RIGHT_CLICK", "Right click context menu is prohibited.");
+    });
+
+    // B) Block Copy, Cut, Paste
+    ['copy', 'cut', 'paste'].forEach(evt => {
+      document.addEventListener(evt, (e) => {
+        e.preventDefault();
+        triggerStrike("CLIPBOARD_ATTEMPT", "Copy, cut, and paste actions are disabled! Do not attempt to copy questions.");
+      });
+    });
+
+    // C) Block Text Selection Dragging
+    document.addEventListener('selectstart', (e) => {
+      e.preventDefault();
+    });
+
+    // D) Block Key Shortcuts & Function Keys (F1-F12, Ctrl+C, Ctrl+V, Ctrl+U, PrintScreen)
+    window.addEventListener('keydown', (e) => {
+      if (isTerminated) return;
+
+      const key = e.key;
+
+      // Block all F1 to F12 keys
+      if (key.startsWith('F') && key.length <= 3 && !isNaN(key.substring(1))) {
+        e.preventDefault();
+        triggerStrike("FUNCTION_KEY", `Function key (${key}) is blocked.`);
+        return false;
+      }
+
+      // Block PrintScreen / Screen Capture keys
+      if (key === 'PrintScreen' || key === 'Snapshot') {
+        e.preventDefault();
+        // Clear clipboard
+        if (navigator.clipboard) navigator.clipboard.writeText('');
+        // Flash blackout veil
+        veil.style.display = 'block';
+        setTimeout(() => { veil.style.display = 'none'; }, 1000);
+        triggerStrike("SCREENSHOT_ATTEMPT", "Screenshots are strictly prohibited!");
+        return false;
+      }
+
+      // Block Ctrl combinations (C, V, X, U, P, S, Shift+I, etc.)
+      if (e.ctrlKey || e.metaKey) {
+        const lowerKey = key.toLowerCase();
+        if (['c', 'v', 'x', 'u', 'p', 's', 'a'].includes(lowerKey) || (e.shiftKey && ['i', 'j', 'c'].includes(lowerKey))) {
+          e.preventDefault();
+          triggerStrike("RESTRICTED_KEY_COMBO", `Ctrl+${key.toUpperCase()} combination is blocked.`);
+          return false;
+        }
+      }
+    });
+
+    // E) Detect Tab Switching / Window Blur
+    window.addEventListener('blur', () => {
+      if (isTerminated) return;
+      triggerStrike("TAB_SWITCH", "You switched tabs or left the active examination window!");
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (isTerminated) return;
+      if (document.hidden) {
+        triggerStrike("TAB_HIDDEN", "Exam tab minimized or switched!");
+      }
+    });
+
+    // F) Confirm before leaving/reloading page
+    window.addEventListener('beforeunload', (e) => {
+      if (!isTerminated) {
+        e.preventDefault();
+        e.returnValue = "Are you sure? Exiting will submit your examination with violations recorded.";
+      }
+    });
+
+    // ==========================================
+    // 2. BACKGROUND AI PROCTORING ENGINE
+    // ==========================================
+    async function initBackgroundAI() {
+      try {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+        ]);
+
+        // Request camera and microphone silently
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, frameRate: { ideal: 30 } },
+          audio: true
+        });
+        video.srcObject = stream;
+
+        // Background Web Audio Analyser
+        setupAudio(stream);
+
+        video.addEventListener('loadeddata', () => {
+          overlay.width = 640;
+          overlay.height = 480;
+          startSilentMonitoring();
+        });
+      } catch (err) {
+        console.error("Proctoring initialisation error:", err);
+      }
+    }
+
+    function setupAudio(stream) {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 256;
+        source.connect(audioAnalyser);
+        audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+
+        function sampleAudio() {
+          if (audioAnalyser) {
+            audioAnalyser.getByteFrequencyData(audioDataArray);
+            let sum = 0;
+            const count = Math.floor(audioDataArray.length * 0.7);
+            for (let i = 0; i < count; i++) sum += audioDataArray[i];
+            currentAudioVolume = sum / count;
+          }
+          requestAnimationFrame(sampleAudio);
+        }
+        sampleAudio();
+      } catch (e) {
+        console.warn("Audio unavailable:", e);
+      }
+    }
+
+    function startSilentMonitoring() {
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.35 });
+
+      setInterval(async () => {
+        if (isTerminated) return;
+
+        const detections = await faceapi.detectAllFaces(video, detectorOptions)
+          .withFaceLandmarks();
+
+        // 1. Multiple Faces Detected (Room Intrusion)
+        if (detections.length > 1) {
+          triggerStrike("MULTIPLE_FACES", "Multiple faces detected in camera frame!");
+        }
+        // 2. No Face Detected (Leaving Camera)
+        else if (detections.length === 0) {
+          noFaceCounter++;
+          if (noFaceCounter > 25) { // ~2.5 seconds
+            triggerStrike("NO_FACE", "No candidate face visible on screen!");
+          }
+        } 
+        // 3. Exactly One Face: Check Gaze, Lap Notes & Speech
+        else {
+          noFaceCounter = 0;
+          const det = detections[0];
+          const landmarks = det.landmarks;
+
+          // A) Lap / Book Looking Down Detection
+          const isLookingDown = checkLookingDown(landmarks);
+          if (isLookingDown) {
+            lookingDownFrames++;
+            if (lookingDownFrames >= 32) { // ~3.5 seconds
+              triggerStrike("LOOKING_DOWN", "Looking down at lap/book detected! Look at screen.");
+              lookingDownFrames = 0;
+            }
+          } else {
+            lookingDownFrames = Math.max(0, lookingDownFrames - 2);
+          }
+
+          // B) Speech & Whisper Detection
+          const isSpeaking = checkSpeech(landmarks, currentAudioVolume);
+          if (isSpeaking) {
+            whisperStreak++;
+            if (whisperStreak >= 4) {
+              triggerStrike("TALKING", "Speech or whispering detected during examination!");
+              whisperStreak = 0;
+            }
+          } else {
+            whisperStreak = Math.max(0, whisperStreak - 1);
+          }
+        }
+      }, 110);
+    }
+
+    // Measure Vertical Head Pitch for Lap/Notes reading
+    function checkLookingDown(landmarks) {
+      const p = landmarks.positions;
+      const eyeCenterY = (p[36].y + p[45].y) / 2;
+      const upperFace = Math.max(1, p[30].y - eyeCenterY);
+      const lowerFace = Math.max(1, p[8].y - p[30].y);
+      const pitchRatio = upperFace / lowerFace;
+
+      if (baselinePitch === null) {
+        calibrationFrames.push(pitchRatio);
+        if (calibrationFrames.length >= 20) {
+          baselinePitch = calibrationFrames.reduce((a, b) => a + b, 0) / calibrationFrames.length;
+        }
+        return false;
+      }
+
+      return (pitchRatio - baselinePitch > 0.33) || (pitchRatio > 1.38);
+    }
+
+    // Measure Kinetic Lip Movement & Audio
+    function checkSpeech(landmarks, micVol) {
+      const p = landmarks.positions;
+      const eyeDist = Math.hypot(p[36].x - p[45].x, p[36].y - p[45].y);
+      if (eyeDist < 10) return false;
+
+      const innerGap = Math.hypot(p[62].x - p[66].x, p[62].y - p[66].y);
+      const outerGap = Math.hypot(p[51].x - p[57].x, p[51].y - p[57].y);
+      const combinedLip = (innerGap * 1.5 + outerGap) / eyeDist;
+
+      let vel = 0;
+      if (prevLipDistance !== null) vel = Math.abs(combinedLip - prevLipDistance);
+      prevLipDistance = combinedLip;
+
+      lipVelocityHistory.push(vel);
+      if (lipVelocityHistory.length > 12) lipVelocityHistory.shift();
+      if (lipVelocityHistory.length < 6) return false;
+
+      const avgVel = lipVelocityHistory.reduce((a, b) => a + b, 0) / lipVelocityHistory.length;
+
+      // Audio whisper + lip motion or loud speech
+      return (micVol > 14 && avgVel > 0.006) || (avgVel > 0.018 && combinedLip > 0.12) || (micVol > 28 && avgVel > 0.004);
+    }
+
+    // ==========================================
+    // 3. STRIKE & TERMINATION SYSTEM
+    // ==========================================
+    function triggerStrike(code, message) {
+      const now = Date.now();
+      // 3.5s cooldown to prevent firing multiple strikes for a single event
+      if (now - lastViolationTime < 3500) return;
+      lastViolationTime = now;
+
+      strikes++;
+      const timeStr = new Date().toLocaleTimeString();
+      incidentList.push({ code, message, time: timeStr });
+
+      // Save to localStorage for administrative inspection
+      localStorage.setItem('exam_violations', JSON.stringify(incidentList));
+
+      strikeBadge.innerText = `${strikes} / ${MAX_STRIKES}`;
+      strikeBadge.className = strikes >= 2 ? "text-sm font-extrabold text-rose-500 font-mono animate-pulse" : "text-sm font-extrabold text-amber-400 font-mono";
+
+      if (strikes >= MAX_STRIKES) {
+        terminateExam();
+      } else {
+        showViolationModal(message);
+      }
+    }
+
+    function showViolationModal(msg) {
+      violationText.innerText = msg;
+      violationModal.classList.remove('hidden');
+    }
+
+    function dismissViolationModal() {
+      violationModal.classList.add('hidden');
+    }
+
+    function terminateExam() {
+      isTerminated = true;
+      violationModal.classList.add('hidden');
+      terminationScreen.classList.remove('hidden');
+
+      terminationReasons.innerHTML = incidentList.map(item => `
+        <div class="flex justify-between border-b border-slate-800 pb-1">
+          <span class="text-rose-400 font-bold">[${item.code}]</span>
+          <span>${item.message}</span>
+          <span class="text-slate-500">${item.time}</span>
+        </div>
+      `).join('');
+    }
+
+    // Mock Countdown Timer (45 Minutes)
+    let totalSecs = 45 * 60;
+    setInterval(() => {
+      if (isTerminated || totalSecs <= 0) return;
+      totalSecs--;
+      const m = String(Math.floor(totalSecs / 60)).padStart(2, '0');
+      const s = String(totalSecs % 60).padStart(2, '0');
+      document.getElementById('exam-timer').innerText = `${m}:${s}`;
+    }, 1000);
+
+    window.onload = initBackgroundAI;
+  </script>
+</body>
+</html>
