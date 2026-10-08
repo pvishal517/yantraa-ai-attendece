@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>Secure Online Exam</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="./face-api.js"></script>
+<style>
+*{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+html,body{overscroll-behavior:none}
+html{height:100%}
+body{display:flex;flex-direction:column;height:100dvh;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+@media print{html,body{display:none!important}}
+#wm{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.08}
+#cam{position:fixed;right:.75rem;bottom:calc(4.75rem + env(safe-area-inset-bottom));width:4.6rem;height:6.2rem;z-index:40;border-radius:1rem;overflow:hidden;border:2px solid #10b981;background:#000;pointer-events:none}
+@media(min-width:640px){#cam{width:8rem;height:10.5rem}}
+#cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+.ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:1.25rem;text-align:center}
+.ov.on{display:flex}
+button{touch-action:manipulation}
+</style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans overflow-x-hidden">
+<div id="wm"></div>
+
+<!-- START GATE -->
+<section id="gate" class="ov on z-[90] bg-slate-950 overflow-y-auto">
+ <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 text-left space-y-3 my-auto">
+  <h1 class="text-xl font-black">Secure Online Exam</h1>
+  <input id="in-name" placeholder="Full name" class="w-full p-3.5 rounded-xl bg-slate-800 border border-slate-700 text-base" style="user-select:text">
+  <input id="in-id" placeholder="Student ID" class="w-full p-3.5 rounded-xl bg-slate-800 border border-slate-700 text-base" style="user-select:text">
+  <ul class="text-sm text-slate-400 space-y-1 list-disc pl-5">
+   <li><b>Best experience:</b> add this page to your Home Screen and open it from the icon (full-screen app mode).</li>
+   <li>Sit alone in a bright, quiet room. Hold/prop the device at eye level.</li>
+   <li>Keep your face in the camera at all times. Do not talk, look away or look down.</li>
+   <li>Normal background noise is fine. Only continuous talking or voices for about a minute give a warning.</li>
+   <li>Do not switch apps, pull down notifications, screenshot, copy or print.</li>
+   <li>3 violations end and submit your exam. Your name is watermarked on screen.</li>
+  </ul>
+  <p id="gate-msg" class="text-sm text-amber-400 min-h-[1.25rem]"></p>
+  <button id="btn-start" class="w-full py-3.5 rounded-xl bg-indigo-600 active:bg-indigo-500 font-bold text-base">Allow Camera &amp; Start</button>
+ </div>
+</section>
+
+<!-- HEADER -->
+<header id="hdr" class="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 px-3 py-2.5 flex items-center justify-between gap-2">
+ <div class="min-w-0"><p id="d-name" class="text-sm font-bold truncate">-</p><p id="d-id" class="text-[11px] text-slate-400 font-mono truncate">-</p></div>
+ <div class="flex gap-2 shrink-0">
+  <div class="bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-mono">⚠ <b id="strikes" class="text-emerald-400">0/3</b></div>
+  <div class="bg-indigo-950 border border-indigo-800 rounded-lg px-2.5 py-1 text-xs font-mono font-black" id="timer">--:--</div>
+ </div>
+</header>
+<div id="coach" class="hidden z-30 bg-amber-500 text-black text-sm font-bold text-center py-1.5"></div>
+
+<!-- QUESTION -->
+<main class="flex-1 overflow-y-auto w-full"><div class="max-w-3xl mx-auto p-3 sm:p-5 pb-40">
+ <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6">
+  <div class="flex justify-between items-center border-b border-slate-800 pb-2 mb-3 text-xs">
+   <span id="qn" class="font-extrabold text-indigo-400 uppercase"></span><span class="bg-slate-800 px-2 py-0.5 rounded text-slate-300">+4 / -1</span>
+  </div>
+  <h2 id="qt" class="text-base sm:text-lg font-semibold leading-relaxed"></h2>
+  <div id="opts" class="space-y-3 pt-4"></div>
+ </div>
+</div></main>
+
+<pre id="dbg" class="hidden fixed top-14 left-2 z-[75] bg-black/80 text-emerald-300 text-[10px] p-2 rounded pointer-events-none"></pre>
+<div id="cam"><video id="vid" autoplay muted playsinline></video><canvas id="ovl"></canvas></div>
+
+<footer class="fixed bottom-0 inset-x-0 z-30 bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 pt-2.5 flex gap-2" style="padding-bottom:calc(.625rem + env(safe-area-inset-bottom))">
+ <button id="b-prev" class="px-4 py-3 rounded-xl bg-slate-800 active:bg-slate-700 text-sm font-semibold">‹ Prev</button>
+ <button id="b-rev" class="px-4 py-3 rounded-xl bg-slate-800 active:bg-slate-700 text-amber-400 text-sm font-semibold">⚑</button>
+ <button id="b-pal" class="px-4 py-3 rounded-xl bg-slate-800 active:bg-slate-700 text-sm font-semibold">☰</button>
+ <button id="b-next" class="flex-1 py-3 rounded-xl bg-indigo-600 active:bg-indigo-500 text-sm font-bold">Save &amp; Next ›</button>
+</footer>
+
+<!-- PALETTE / SUBMIT -->
+<section id="pal" class="ov z-[70] bg-black/80 items-end sm:items-center">
+ <div class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-4 text-left">
+  <div class="flex justify-between mb-3"><b>Questions</b><button id="b-close" class="text-slate-400 px-2">✕</button></div>
+  <div id="grid" class="grid grid-cols-5 gap-2 mb-4"></div>
+  <p class="text-[11px] text-slate-400 mb-3"><span class="text-emerald-400">■</span> answered <span class="text-amber-400">■</span> marked <span class="text-slate-500">■</span> pending</p>
+  <button id="b-submit" class="w-full py-3.5 rounded-xl bg-emerald-600 active:bg-emerald-500 font-bold">Submit Exam</button>
+ </div>
+</section>
+
+<!-- WARNING -->
+<section id="vm" class="ov z-[80] bg-black/85">
+ <div class="w-full max-w-sm bg-slate-900 border-2 border-rose-600 rounded-2xl p-5">
+  <div class="text-3xl mb-1">⚠️</div><h3 class="font-bold">PROCTOR WARNING</h3>
+  <p id="vt" class="text-sm text-rose-300 font-semibold my-2"></p>
+  <p class="text-xs text-slate-400 mb-4">3 strikes will void and submit your exam.</p>
+  <button id="b-vok" class="w-full py-3 rounded-xl bg-rose-600 active:bg-rose-500 font-bold">I Understand &amp; Resume</button>
+ </div>
+</section>
+
+<!-- BLACKOUT CURTAIN -->
+<section id="curtain" class="ov z-[9999] bg-slate-950 flex-col">
+ <div class="text-5xl mb-3">🛡️</div><h2 class="text-xl font-black text-rose-500">EXAM PAUSED</h2>
+ <p id="cur-msg" class="text-slate-400 text-sm mt-2 mb-5 max-w-xs">Leaving the exam screen was recorded.</p>
+ <button id="b-resume" class="px-8 py-3 rounded-xl bg-indigo-600 font-bold">Resume Exam</button>
+</section>
+
+<!-- END -->
+<section id="end" class="ov z-[99999] bg-slate-950 flex-col overflow-y-auto">
+ <div class="text-5xl mb-2" id="end-ico">✅</div>
+ <h2 id="end-title" class="text-2xl font-black"></h2>
+ <p id="end-sub" class="text-slate-400 text-sm mt-2 max-w-xs"></p>
+ <div id="end-log" class="bg-slate-900 border border-slate-800 rounded-xl p-3 mt-4 text-left text-xs font-mono text-slate-400 max-w-sm w-full space-y-1"></div>
+</section>
+
+<script>
+/* ============ CONFIG ============ */
+const CFG={ENDPOINT:'' /* Apps Script / server URL that receives the result */,MAX:3,MINS:45,COOL:4000,VOICE_N:400,TALK_MS:10000,MODELS:'./models/'};
+const Q=[
+ {q:'Which data structure is LIFO, and which operation removes an element?',o:['Queue • dequeue()','Stack • pop()','Array • slice()','Binary Tree • prune()']},
+ {q:'Which HTML tag is used for the largest heading?',o:['<h6>','<head>','<h1>','<heading>']},
+ {q:'What is the time complexity of binary search?',o:['O(n)','O(log n)','O(n²)','O(1)']},
+ {q:'Which is NOT a JavaScript data type?',o:['String','Boolean','Float','Undefined']}
+]; /* Load real questions from your server; keep the answer key server-side. */
+
+/* ============ STATE ============ */
+const $=id=>document.getElementById(id);
+const S={ans:Q.map(()=>-1),rev:new Set(),i:0,strikes:0,log:[],on:false,done:false,last:0,left:CFG.MINS*60,stu:{},sub:false,soft:{},end:0};
+const isMobile=matchMedia('(pointer:coarse)').matches;
+const fsOK=!!document.documentElement.requestFullscreen;
+let stream,B=null,busy=false,ac,an,adata,audio=0,floor=8;
+const hold={},marH=[];let lastClose=false,lastF=null,wlock=null,dbgOn=false,dark=false,tick=0;
+let QS=Q.map((q,i)=>({i,q:q.q,o:q.o.map((t,k)=>({t,orig:k}))}));
+function shuffle(a,seed){let h=0;for(const c of seed)h=Math.imul(h^c.charCodeAt(0),2654435761)>>>0;
+ const rnd=()=>{h=(h+0x6D2B79F5)|0;let t=Math.imul(h^h>>>15,1|h);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+ for(let i=a.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function bright(){try{const c=document.createElement('canvas');c.width=c.height=16;const x=c.getContext('2d');x.drawImage($('vid'),0,0,16,16);const d=x.getImageData(0,0,16,16).data;let t=0;for(let i=0;i<d.length;i+=4)t+=.3*d[i]+.59*d[i+1]+.11*d[i+2];return t/256}catch(e){return 255}}
+const wl=async()=>{try{wlock=await navigator.wakeLock.request('screen')}catch(e){}};
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&S.on)wl()});
+
+/* ============ UI ============ */
+function render(){
+ const q=QS[S.i];$('qn').textContent=`Question ${S.i+1} / ${QS.length}`;$('qt').textContent=q.q;
+ $('opts').innerHTML=q.o.map((t,k)=>`<button data-k="${k}" class="w-full text-left min-h-[56px] p-4 rounded-xl border text-base ${S.ans[S.i]===k?'bg-indigo-600 border-indigo-300':'bg-slate-800 border-slate-700 active:bg-slate-700'}">${'ABCD'[k]}) ${t.t.replace(/</g,'&lt;')}</button>`).join('');
+ $('b-rev').style.background=S.rev.has(S.i)?'#78350f':'';
+ $('b-next').textContent=S.i===QS.length-1?'Review ›':'Save & Next ›';
+}
+function grid(){
+ $('grid').innerHTML=QS.map((_,k)=>`<button data-g="${k}" class="py-3 rounded-lg font-bold ${S.rev.has(k)?'bg-amber-500 text-black':S.ans[k]>=0?'bg-emerald-600':'bg-slate-700'} ${k===S.i?'ring-2 ring-white':''}">${k+1}</button>`).join('');
+ $('b-submit').textContent='Submit Exam';
+}
+$('opts').onclick=e=>{const b=e.target.closest('[data-k]');if(b){S.ans[S.i]=+b.dataset.k;render()}};
+$('b-prev').onclick=()=>{if(S.i>0){S.i--;render()}};
+$('b-next').onclick=()=>{if(S.i<QS.length-1){S.i++;render()}else{grid();$('pal').classList.add('on')}};
+$('b-rev').onclick=()=>{S.rev.has(S.i)?S.rev.delete(S.i):S.rev.add(S.i);render()};
+$('b-pal').onclick=()=>{grid();$('pal').classList.add('on')};
+$('b-close').onclick=()=>$('pal').classList.remove('on');
+$('grid').onclick=e=>{const b=e.target.closest('[data-g]');if(b){S.i=+b.dataset.g;render();$('pal').classList.remove('on')}};
+$('b-submit').onclick=()=>{if(!S.sub){S.sub=true;$('b-submit').textContent='Tap again to confirm submit';setTimeout(()=>S.sub=false,4000)}else finish('submitted')};
+$('b-vok').onclick=()=>$('vm').classList.remove('on');
+$('b-resume').onclick=async()=>{
+ if(fsOK&&!document.fullscreenElement){try{await document.documentElement.requestFullscreen()}catch(e){}}
+ if(!document.hidden)$('curtain').classList.remove('on');
+};
+function coach(t){const c=$('coach');if(t){c.textContent=t;c.classList.remove('hidden')}else c.classList.add('hidden')}
+
+/* ============ STRIKES & EVIDENCE ============ */
+function snap(){try{const c=document.createElement('canvas');c.width=160;c.height=213;c.getContext('2d').drawImage($('vid'),0,0,160,213);return c.toDataURL('image/jpeg',.5)}catch(e){return ''}}
+function save(){try{localStorage.setItem('exam_state',JSON.stringify({stu:S.stu,ans:S.ans,log:S.log.map(({code,msg,t})=>({code,msg,t}))}))}catch(e){}}
+function flag(code,msg,soft){
+ if(!S.on||S.done)return false;
+ const n=Date.now();if(n-S.last<CFG.COOL)return false;S.last=n;
+ if(soft&&!S.soft[code]){S.soft[code]=1;S.log.push({code:code+'_WARNING',msg,t:new Date().toISOString(),img:snap()});save();$('vt').textContent='Warning (no strike yet): '+msg;$('vm').classList.add('on');return true}
+ S.strikes++;S.log.push({code,msg,t:new Date().toISOString(),img:snap()});save();
+ const b=$('strikes');b.textContent=`${S.strikes}/${CFG.MAX}`;b.className=S.strikes>=2?'text-rose-500':'text-amber-400';
+ if(S.strikes>=CFG.MAX){finish('terminated');return true}
+ $('vt').textContent=msg;$('vm').classList.add('on');return true;
+}
+function cover(msg,code){
+ if(!S.on||S.done)return;
+ $('cur-msg').textContent=msg;$('curtain').classList.add('on');
+ try{navigator.clipboard&&navigator.clipboard.writeText('Exam content is protected.')}catch(e){}
+ flag(code,msg);
+}
+function finish(status){
+ if(S.done)return;S.done=true;S.on=false;
+ ['vm','curtain','pal','gate'].forEach(i=>$(i).classList.remove('on'));
+ if(stream)stream.getTracks().forEach(t=>t.stop());
+ try{document.fullscreenElement&&document.exitFullscreen()}catch(e){}
+ const bad=status==='terminated';
+ $('end-ico').textContent=bad?'🚫':'✅';
+ $('end-title').textContent=bad?'EXAM TERMINATED':status==='timeup'?'TIME UP':'EXAM SUBMITTED';
+ $('end-title').className='text-2xl font-black '+(bad?'text-rose-500':'text-emerald-400');
+ $('end-sub').textContent=bad?'Suspended after repeated integrity violations. Your answers so far were submitted.':'Your answers were submitted successfully.';
+ $('end-log').innerHTML=S.log.map(l=>`<div>[${l.code}] ${l.msg} <span class="text-slate-600">${new Date(l.t).toLocaleTimeString()}</span></div>`).join('')||'No violations recorded.';
+ $('end-log').style.display=S.log.length?'block':'none';
+ $('end').classList.add('on');
+ const payload=JSON.stringify({status,student:S.stu,answers:QS.map((q,d)=>({q:q.i,a:S.ans[d]>=0?q.o[S.ans[d]].orig:-1})),incidents:S.log,submittedAt:new Date().toISOString()});
+ save();
+ if(CFG.ENDPOINT){try{navigator.sendBeacon(CFG.ENDPOINT,new Blob([payload],{type:'text/plain'}))}catch(e){}}
+}
+
+/* ============ ANTI-CAPTURE / ANTI-COPY (deterrence + detection) ============ */
+addEventListener('blur',()=>cover('You left the exam screen (app switch, notification bar or capture).','FOCUS_LOST'));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)cover('Exam was minimised or another app opened.','APP_SWITCH')});
+document.addEventListener('fullscreenchange',()=>{if(fsOK&&S.on&&!document.fullscreenElement)cover('Fullscreen exited. Return to fullscreen to continue.','FULLSCREEN_EXIT')});
+addEventListener('touchstart',e=>{if(S.on&&e.touches.length>=3){e.preventDefault();cover('3-finger screenshot gesture detected.','GESTURE_CAPTURE')}},{passive:false});
+['gesturestart','dragstart','selectstart','contextmenu'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+['copy','cut','paste'].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();if(S.on)flag('CLIPBOARD','Copy / paste is not allowed.')}));
+addEventListener('beforeprint',()=>cover('Printing is not allowed.','PRINT'));
+addEventListener('keyup',e=>{if(S.on&&(e.key==='PrintScreen'||e.code==='PrintScreen')){try{navigator.clipboard.writeText('blocked')}catch(_){}cover('Screenshot key pressed.','PRINTSCREEN')}});
+addEventListener('keydown',e=>{
+ if(!S.on)return;const k=e.key.toLowerCase(),m=e.ctrlKey||e.metaKey;
+ const sc=(e.metaKey&&e.shiftKey&&['3','4','5','s'].includes(k))||(e.shiftKey&&e.metaKey&&k==='s');
+ if(sc){e.preventDefault();cover('Screenshot shortcut detected.','SCREENSHOT_KEY');return}
+ if(e.key==='F12'||(m&&e.shiftKey&&['i','j','c'].includes(k))||(m&&['u','s','p','c','x','v','a','f'].includes(k))){e.preventDefault();flag('SHORTCUT','Restricted keyboard shortcut used.')}
+});
+addEventListener('beforeunload',e=>{if(S.on){e.preventDefault();e.returnValue=''}});
+let taps=0;$('hdr').onclick=()=>{if(++taps>=5){taps=0;dbgOn=!dbgOn;$('dbg').classList.toggle('hidden',!dbgOn)}setTimeout(()=>taps=0,2500)};
+/* Block in-page screen recording via getDisplayMedia */
+try{if(navigator.mediaDevices)navigator.mediaDevices.getDisplayMedia=()=>{flag('SCREEN_RECORD','Screen recording attempt blocked.');return Promise.reject(new DOMException('Blocked','NotAllowedError'))}}catch(e){}
+/* DevTools (desktop) */
+setInterval(()=>{if(S.on&&!isMobile&&(outerWidth-innerWidth>170||outerHeight-innerHeight>220))flag('DEVTOOLS','Developer tools detected.')},2000);
+
+/* ============ AUDIO ============ */
+const VW=[];let vCount=0,vHist=[],vNow=false,acn=0;
+function setupAudio(s){
+ try{
+  ac=new(window.AudioContext||window.webkitAudioContext)();const src=ac.createMediaStreamSource(s);
+  an=ac.createAnalyser();an.fftSize=512;src.connect(an);adata=new Uint8Array(an.frequencyBinCount);
+  setInterval(()=>{
+   an.getByteFrequencyData(adata);let sum=0;for(let i=3;i<37;i++)sum+=adata[i]; /* ~300-3400 Hz voice band */
+   const vb=sum/34;audio=vb;
+   floor+=(vb-floor)*(acn++<30?.2:(vb<floor?.1:.003)); /* learns the room's background level continuously */
+   vHist.push(vb);if(vHist.length>10)vHist.shift();
+   const m=vHist.reduce((a,b)=>a+b)/vHist.length,sd=Math.sqrt(vHist.reduce((a,b)=>a+(b-m)*(b-m),0)/vHist.length);
+   vNow=vb>floor+9&&sd>3; /* louder than the room AND speech-like variation (steady noise ignored) */
+   VW.push(vNow?1:0);vCount+=vNow?1:0;if(VW.length>600)vCount-=VW.shift();
+   if(S.on&&vCount>=CFG.VOICE_N){VW.length=0;vCount=0;flag('VOICE','Human voice or talking continued for about a minute.',true)}
+  },100);
+ }catch(e){}
+}
+
+/* ============ FACE ANALYSIS ============ */
+function feat(l){
+ const p=l.positions,d=(a,b)=>Math.hypot(p[a].x-p[b].x,p[a].y-p[b].y);
+ const yaw=(p[30].x-p[0].x)/Math.max(1,p[16].x-p[0].x);
+ const pitch=(p[30].y-(p[36].y+p[45].y)/2)/Math.max(1,p[8].y-p[30].y);
+ const ear=((d(37,41)+d(38,40))/(2*d(36,39))+(d(43,47)+d(44,46))/(2*d(42,45)))/2;
+ const mar=(d(62,66)*1.6+d(51,57))/Math.max(1,d(48,54));
+ return{yaw,pitch,ear,mar};
+}
+function sustain(k,cond,ms){
+ if(!cond){hold[k]=0;return 0}
+ if(!hold[k])hold[k]=Date.now();return Date.now()-hold[k]>=ms?2:1; /* 1 = soft warning, 2 = strike */
+}
+function hit(k,state,soft,code,msg,dl=700,sf=false){
+ if(state===1&&soft&&Date.now()-hold[k]>dl)coach(soft);
+ if(state===2){hold[k]=0;flag(code,msg,sf)}
+}
+const opt=()=>new faceapi.TinyFaceDetectorOptions({inputSize:isMobile?416:320,scoreThreshold:isMobile?.3:.4});
+
+async function calibrate(){
+ const samples=[];const t0=Date.now();
+ while(samples.length<25){
+  if(Date.now()-t0>25000)throw new Error('Could not see a single clear face. Improve lighting, face the camera and retry.');
+  const d=await faceapi.detectAllFaces($('vid'),opt()).withFaceLandmarks();
+  const vw=$('vid').videoWidth||480,rt=d.length===1?d[0].detection.box.width/vw:0,gm=$('gate-msg');
+  if(d.length!==1)gm.textContent='Show one full face. Hold the phone at eye level, about an arm length away.';
+  else if(rt>.7)gm.textContent='Too close. Move the device a little back.';
+  else if(rt<.15)gm.textContent='Too far. Move a little closer.';
+  else{samples.push(Object.assign(feat(d[0].landmarks),{w:rt}));gm.textContent=`Calibrating… look straight at the screen (${samples.length}/25)`}
+  await new Promise(r=>setTimeout(r,120));
+ }
+ const avg=k=>samples.reduce((a,s)=>a+s[k],0)/samples.length;
+ B={yaw:avg('yaw'),pitch:avg('pitch'),ear:avg('ear'),w:avg('w')};
+}
+
+function loop(){
+ const ctx=$('ovl').getContext('2d');
+ setInterval(async()=>{
+  if(!S.on||busy)return;busy=true;
+  let dets=[];try{dets=await faceapi.detectAllFaces($('vid'),opt()).withFaceLandmarks()}catch(e){}
+  busy=false;ctx.clearRect(0,0,$('ovl').width,$('ovl').height);
+  let bad=false;
+  const vw=$('vid').videoWidth||480,vh=$('vid').videoHeight||640;
+  const cutN=l=>l.positions.filter(q=>q.x<2||q.y<2||q.x>vw-2||q.y>vh-2).length;
+  const bigBox=b=>b.width/vw>Math.max(B.w*1.7,.82);
+  const close=dets.length===1&&(cutN(dets[0].landmarks)>=4||bigBox(dets[0].detection.box));
+  if(dets.length===1)lastClose=close;
+  const lost=dets.length===0,near=lost&&lastClose;
+  const multi=sustain('multi',dets.length>1,1000);
+  const none=sustain('none',lost&&!near,isMobile?6000:4000);
+  const nr=sustain('near',close||near,20000);
+  if(multi){hit('multi',multi,'Only one person allowed','MULTIPLE_FACES','More than one face detected.');bad=true}
+  if(none){hit('none',none,'Face not visible. Look at the screen','NO_FACE','Face not visible or turned away.');bad=true}
+  if(nr){hit('near',nr,'Move the device a little back to show your full face','FACE_TOO_CLOSE','Face too close or partly out of frame for too long.',3000);bad=true}
+  if(dets.length===1&&!close){
+   const f=(lastF=feat(dets[0].landmarks)),side=Math.abs(f.yaw-B.yaw)>.13;
+   const down=f.pitch-B.pitch>.22||f.ear<B.ear*.55,up=B.pitch-f.pitch>.25;
+   const s1=sustain('side',side,1800),s2=sustain('down',down,2000),s3=sustain('up',up,2200);
+   if(s1){hit('side',s1,'Look at the screen','LOOKING_SIDE','Looking left/right away from the screen.');bad=true}
+   if(s2){hit('down',s2,'Do not look down','LOOKING_DOWN','Looking down (lap / notes / second device).');bad=true}
+   if(s3){hit('up',s3,'Look at the screen','LOOKING_UP','Looking up away from the screen.');bad=true}
+   /* Talking: lip movement + voice energy, or sustained voice alone */
+   marH.push(f.mar);if(marH.length>12)marH.shift();
+   const mx=Math.max(...marH),mn=Math.min(...marH),osc=mx-mn;
+   const moving=marH.length>=8&&osc>.05,voice=vNow;
+   const t1=sustain('talk',moving&&voice&&!side,CFG.TALK_MS);
+   if(t1){hit('talk',t1,'No talking','TALKING','Talking detected (lip movement + voice).',700,true);bad=true}
+  }
+  if(++tick%30===0)dark=bright()<45;
+  if(dark)coach('Room is too dark. Please turn on a light.');else if(!bad&&!Object.values(hold).some(v=>v))coach('');
+  if(dbgOn&&lastF)$('dbg').textContent=`yaw ${(lastF.yaw-B.yaw).toFixed(2)} pitch ${(lastF.pitch-B.pitch).toFixed(2)} ear ${lastF.ear.toFixed(2)}/${B.ear.toFixed(2)}
+faces ${dets.length} close ${close} baseW ${B.w.toFixed(2)}
+voice ${vNow} ${vCount}/${CFG.VOICE_N} level ${audio.toFixed(0)} floor ${floor.toFixed(0)}`;
+  const col=bad?'#ef4444':'#10b981';$('cam').style.borderColor=col;
+  if(dets[0]){const b=dets[0].detection.box;ctx.lineWidth=3;ctx.strokeStyle=col;ctx.strokeRect(b.x,b.y,b.width,b.height)}
+ },150);
+}
+
+/* ============ START ============ */
+const prof=(JSON.parse(localStorage.getItem('registered_profiles')||'[]')[0])||{};
+$('in-name').value=prof.name||'';$('in-id').value=prof.id||'';
+$('btn-start').onclick=async()=>{
+ const name=$('in-name').value.trim(),id=$('in-id').value.trim(),msg=$('gate-msg'),btn=$('btn-start');
+ if(!name||!id){msg.textContent='Enter your name and student ID.';return}
+ btn.disabled=true;msg.textContent='Loading AI models…';
+ try{
+  await Promise.all([faceapi.nets.tinyFaceDetector.loadFromUri(CFG.MODELS),faceapi.nets.faceLandmark68Net.loadFromUri(CFG.MODELS)]);
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:480},height:{ideal:640}},audio:{echoCancellation:false,noiseSuppression:false}});
+  const v=$('vid');v.srcObject=stream;await v.play();
+  $('ovl').width=v.videoWidth||480;$('ovl').height=v.videoHeight||640;
+  setupAudio(stream);await calibrate();
+  if(fsOK){try{await document.documentElement.requestFullscreen()}catch(e){}}
+  S.stu={name,id};wl();try{await screen.orientation.lock('portrait')}catch(e){}
+  QS.forEach(q=>shuffle(q.o,id+q.i));shuffle(QS,id);
+  $('d-name').textContent=name;$('d-id').textContent='ID: '+id;
+  const esc=s=>s.replace(/[<>&']/g,'');
+  const svg=`<svg xmlns='http://www.w3.org/2000/svg' width='260' height='150'><text x='130' y='75' text-anchor='middle' fill='white' font-size='14' font-family='monospace' transform='rotate(-25 130 75)'>${esc(name)} · ${esc(id)}</text></svg>`;
+  $('wm').style.backgroundImage=`url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  stream.getTracks().forEach(t=>t.onended=()=>{S.on&&(flag('CAMERA_OFF','Camera or microphone was turned off.'),finish('terminated'))});
+  $('gate').classList.remove('on');render();S.end=Date.now()+CFG.MINS*60000;S.on=true;loop();
+  setInterval(()=>{
+   if(S.done)return;S.left=Math.max(0,Math.round((S.end-Date.now())/1000));
+   $('timer').textContent=`${String(Math.floor(S.left/60)).padStart(2,'0')}:${String(S.left%60).padStart(2,'0')}`;
+   if(CFG.ENDPOINT&&S.left%30===0){try{navigator.sendBeacon(CFG.ENDPOINT,new Blob([JSON.stringify({type:'heartbeat',student:S.stu,left:S.left,strikes:S.strikes,answered:S.ans.filter(a=>a>=0).length})],{type:'text/plain'}))}catch(e){}}
+   if(S.left<=0)finish('timeup');
+  },1000);
+ }catch(e){
+  console.error(e);btn.disabled=false;
+  msg.textContent=e.name==='NotAllowedError'?'Camera/microphone permission is required to take this exam.':(e.message||'Could not start. Check camera and models folder.');
+ }
+};
+</script>
+</body>
+</html>
