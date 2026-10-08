@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mobile Online Examination Portal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Local face-api.js -->
+  <script src="./face-api.js"></script>
+  <style>
+    /* Mobile-first touch & selection lockout */
+    *, html, body {
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      -moz-user-select: none !important;
+      -ms-user-select: none !important;
+      user-select: none !important;
+      touch-action: pan-y;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Print / PDF generation lockout */
+    @media print {
+      html, body { display: none !important; visibility: hidden !important; }
+    }
+
+    /* Blackout Curtain for Anti-Screenshot */
+    #blackout-curtain {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background-color: #020617;
+      z-index: 9999999;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      color: #ef4444;
+      font-weight: 800;
+    }
+
+    /* Floating WhatsApp-Style Video Window */
+    #floating-cam {
+      position: fixed;
+      bottom: 5.5rem;
+      right: 1rem;
+      width: 6.5rem;
+      height: 9rem;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      z-index: 50;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
+      border: 2px solid #334155;
+      background: #000;
+    }
+
+    @media (min-width: 640px) {
+      #floating-cam {
+        width: 8.5rem;
+        height: 11.5rem;
+        bottom: 6rem;
+        right: 1.5rem;
+      }
+    }
+
+    #pip-video, #pip-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans select-none overflow-x-hidden pb-24">
+
+  <!-- ANTI-SCREENSHOT BLACKOUT VEIL -->
+  <div id="blackout-curtain" class="flex p-6 text-center">
+    <div class="w-16 h-16 rounded-full bg-rose-950 border border-rose-700 flex items-center justify-center text-3xl mx-auto mb-4">
+      🛡️
+    </div>
+    <h2 class="text-xl font-black text-rose-500 tracking-wider mb-2">CAPTURE PROHIBITED</h2>
+    <p class="text-slate-400 text-xs font-mono">Mobile screenshot or app-switch attempted. Tap here to resume.</p>
+  </div>
+
+  <!-- WHATSAPP-STYLE FLOATING VIDEO FEED -->
+  <div id="floating-cam" class="transition-all duration-200">
+    <video id="pip-video" autoplay muted playsinline></video>
+    <canvas id="pip-overlay"></canvas>
+
+    <!-- WhatsApp-Style Live Indicator Badge -->
+    <div class="absolute top-2 left-2 flex items-center gap-1.5 bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full z-10 border border-white/10">
+      <div id="cam-status-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+      <span id="cam-status-text" class="text-[9px] font-bold tracking-tight text-white uppercase">REC</span>
+    </div>
+  </div>
+
+  <!-- Mobile App Header Bar -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex justify-between items-center sticky top-0 z-40 shadow-lg">
+    <div class="flex items-center gap-2.5">
+      <div class="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center font-black text-base text-white">
+        EX
+      </div>
+      <div>
+        <p id="disp-student-name" class="text-xs font-bold text-white truncate max-w-[130px] sm:max-w-xs">Loading Candidate...</p>
+        <p id="disp-student-id" class="text-[10px] text-slate-400 font-mono">ID: -</p>
+      </div>
+    </div>
+
+    <!-- Live Strikes & Timer Pills -->
+    <div class="flex items-center gap-2">
+      <div class="bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg flex items-center gap-1.5">
+        <span class="text-[10px] text-slate-400 font-semibold">Strikes:</span>
+        <span id="strike-badge" class="text-xs font-black text-emerald-400 font-mono">0/3</span>
+      </div>
+      <div class="bg-indigo-950/80 border border-indigo-800 px-2.5 py-1 rounded-lg text-center">
+        <span id="exam-timer" class="text-xs font-black text-white font-mono">45:00</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Mobile Question Paper Body -->
+  <main class="flex-1 max-w-2xl w-full mx-auto p-4 flex flex-col gap-4">
+    
+    <!-- Question Card -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+      <div>
+        <div class="flex justify-between items-center border-b border-slate-800 pb-2.5 mb-4">
+          <span class="text-xs font-extrabold text-indigo-400 uppercase tracking-wide">Question 03 / 10</span>
+          <span class="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-medium">+4 / -1 Marks</span>
+        </div>
+
+        <h2 class="text-sm sm:text-base font-semibold text-slate-100 leading-relaxed">
+          Which data structure organizes items in a Last-In, First-Out (LIFO) order, and which operation is typically used to remove an element from it?
+        </h2>
+
+        <!-- Touch-Friendly Choice Radio Buttons -->
+        <div class="space-y-3 pt-4">
+          <label class="flex items-center gap-3.5 p-3.5 rounded-xl bg-slate-800/70 border border-slate-700 active:bg-slate-700 transition">
+            <input type="radio" name="opt" class="accent-indigo-500 w-4 h-4">
+            <span class="text-xs sm:text-sm text-slate-200">A) Queue &bull; dequeue()</span>
+          </label>
+          <label class="flex items-center gap-3.5 p-3.5 rounded-xl bg-slate-800/70 border border-slate-700 active:bg-slate-700 transition">
+            <input type="radio" name="opt" class="accent-indigo-500 w-4 h-4">
+            <span class="text-xs sm:text-sm text-slate-200">B) Stack &bull; pop()</span>
+          </label>
+          <label class="flex items-center gap-3.5 p-3.5 rounded-xl bg-slate-800/70 border border-slate-700 active:bg-slate-700 transition">
+            <input type="radio" name="opt" class="accent-indigo-500 w-4 h-4">
+            <span class="text-xs sm:text-sm text-slate-200">C) Array &bull; slice()</span>
+          </label>
+          <label class="flex items-center gap-3.5 p-3.5 rounded-xl bg-slate-800/70 border border-slate-700 active:bg-slate-700 transition">
+            <input type="radio" name="opt" class="accent-indigo-500 w-4 h-4">
+            <span class="text-xs sm:text-sm text-slate-200">D) Binary Tree &bull; prune()</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Examination Notice Card -->
+    <div class="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 text-xs text-slate-400 space-y-1.5 leading-relaxed">
+      <p class="font-bold text-slate-300 uppercase text-[10px] tracking-wider">Mobile Integrity Guidelines:</p>
+      <p>&bull; Do not swipe down the notification bar or switch apps.</p>
+      <p>&bull; 3-finger swipe screenshot or button screenshots trigger an immediate strike.</p>
+      <p>&bull; Keep your head straight. Looking down at your lap triggers an alert.</p>
+    </div>
+  </main>
+
+  <!-- Mobile Bottom Action Bar -->
+  <footer class="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-3 px-4 flex justify-between items-center z-40">
+    <button class="px-4 py-2.5 rounded-xl bg-slate-800 active:bg-slate-700 text-slate-300 text-xs font-semibold">Previous</button>
+    <div class="flex gap-2">
+      <button class="px-4 py-2.5 rounded-xl bg-slate-800 active:bg-slate-700 text-amber-400 text-xs font-semibold">Review</button>
+      <button class="px-5 py-2.5 rounded-xl bg-indigo-600 active:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30">Save & Next</button>
+    </div>
+  </footer>
+
+  <!-- MOBILE VIOLATION MODAL -->
+  <div id="violation-modal" class="fixed inset-0 bg-black/85 flex items-center justify-center hidden z-50 p-5 backdrop-blur-sm">
+    <div class="bg-slate-900 border-2 border-rose-600 p-5 rounded-2xl max-w-sm w-full shadow-2xl text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-600/20 text-rose-500 flex items-center justify-center mx-auto text-2xl font-black mb-3">!</div>
+      <h3 class="text-base font-bold text-white mb-1">PROCTOR WARNING</h3>
+      <p id="violation-text" class="text-xs text-rose-300 font-semibold mb-3">Violation detected.</p>
+      <p class="text-[11px] text-slate-400 mb-4">Reaching 3 strikes will permanently void and submit your examination.</p>
+      <button onclick="dismissViolationModal()" class="w-full py-2.5 rounded-xl bg-rose-600 active:bg-rose-500 font-bold text-white text-xs">
+        I Understand & Resume
+      </button>
+    </div>
+  </div>
+
+  <!-- EXAM TERMINATED SCREEN -->
+  <div id="termination-screen" class="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center hidden z-[99999999] p-6 text-center">
+    <div class="w-16 h-16 rounded-full bg-rose-950 border border-rose-700 flex items-center justify-center text-3xl mb-4">🚫</div>
+    <h2 class="text-2xl font-black text-rose-500 tracking-tight">EXAM TERMINATED</h2>
+    <p class="text-slate-300 text-xs mt-2 max-w-xs">Your exam was suspended due to repeated integrity violations.</p>
+    <div id="termination-reasons" class="bg-slate-900 border border-slate-800 p-3 rounded-xl text-left text-[11px] font-mono text-slate-400 max-w-xs w-full mt-4 space-y-1"></div>
+  </div>
+
+  <script>
+    const MODEL_URL = './models/';
+    const pipVideo = document.getElementById('pip-video');
+    const pipOverlay = document.getElementById('pip-overlay');
+    const floatingCam = document.getElementById('floating-cam');
+    const camStatusDot = document.getElementById('cam-status-dot');
+    const camStatusText = document.getElementById('cam-status-text');
+    const blackoutCurtain = document.getElementById('blackout-curtain');
+    const dispName = document.getElementById('disp-student-name');
+    const dispId = document.getElementById('disp-student-id');
+    const strikeBadge = document.getElementById('strike-badge');
+    const violationModal = document.getElementById('violation-modal');
+    const violationText = document.getElementById('violation-text');
+    const terminationScreen = document.getElementById('termination-screen');
+    const terminationReasons = document.getElementById('termination-reasons');
+
+    let strikes = 0;
+    const MAX_STRIKES = 3;
+    let incidentList = [];
+    let isTerminated = false;
+
+    // Load registered candidate
+    const registeredProfiles = JSON.parse(localStorage.getItem('registered_profiles') || '[]');
+    let currentStudent = registeredProfiles[0] || { name: "Candidate Student", id: "STU-2024-991" };
+    dispName.innerText = currentStudent.name;
+    dispId.innerText = `ID: ${currentStudent.id}`;
+
+    // Pose and speech tracking buffers
+    let prevNosePosition = null;
+    const marHistory = [];
+    let sustainedSpeechFrames = 0;
+    let baselinePitch = null;
+    let calibrationFrames = [];
+    let lookingDownFrames = 0;
+    let lookingAwayFrames = 0;
+    let noFaceCounter = 0;
+    let audioContext = null;
+    let audioAnalyser = null;
+    let audioDataArray = null;
+    let currentAudioVolume = 0;
+    let ambientNoiseFloor = 8;
+    let noiseSamples = [];
+    let lastViolationTime = 0;
+
+    // =========================================================================
+    // 1. ADVANCED MOBILE-SPECIFIC SCREEN CAPTURE & APP SWITCH TRAPS
+    // =========================================================================
+
+    function wipeClipboard() {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText("EXAM SECURITY: Screen capture blocked.");
+        }
+      } catch (e) {}
+    }
+
+    function activateBlackout(reason) {
+      blackoutCurtain.style.display = 'flex';
+      wipeClipboard();
+      triggerStrike("SCREEN_CAPTURE_ATTEMPT", reason || "Screenshot or App Switch detected!");
+    }
+
+    blackoutCurtain.addEventListener('click', () => {
+      blackoutCurtain.style.display = 'none';
+    });
+
+    // A) Trap Mobile 3-Finger Swipe Screenshot Gesture (Xiaomi, Realme, Oppo, Samsung)
+    window.addEventListener('touchstart', (e) => {
+      if (isTerminated) return;
+      if (e.touches.length >= 3) {
+        e.preventDefault();
+        activateBlackout("3-Finger swipe screenshot gesture detected!");
+      }
+    }, { passive: false });
+
+    // B) Trap Focus Loss (App-switching, Pulling notification shade, or Power button screenshot)
+    window.addEventListener('blur', () => {
+      if (isTerminated) return;
+      activateBlackout("Mobile window lost focus (Notification shade or App Switcher)!");
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (isTerminated) return;
+      if (document.hidden) {
+        activateBlackout("Exam minimized or switched to another app!");
+      }
+    });
+
+    // C) Prevent Mobile Context Menu / Long Press Action
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
+    ['copy', 'cut', 'paste'].forEach(evt => {
+      document.addEventListener(evt, (e) => {
+        e.preventDefault();
+        wipeClipboard();
+        triggerStrike("CLIPBOARD_ATTEMPT", "Copy, Cut, and Paste are strictly prohibited!");
+      });
+    });
+
+    // =========================================================================
+    // 2. MOBILE FRONT-CAMERA INITIALIZATION & WHATSAPP FLOATING WINDOW
+    // =========================================================================
+    async function initMobileAI() {
+      try {
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL)
+        ]);
+
+        // Specifically request Mobile Front/Selfie Camera (facingMode: 'user')
+        const constraints = {
+          video: {
+            facingMode: 'user',
+            width: { ideal: 480 },
+            height: { ideal: 640 }
+          },
+          audio: true
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        pipVideo.srcObject = stream;
+
+        setupAudio(stream);
+
+        pipVideo.addEventListener('loadeddata', () => {
+          pipOverlay.width = pipVideo.videoWidth || 480;
+          pipOverlay.height = pipVideo.videoHeight || 640;
+          startProctoringLoop();
+        });
+      } catch (err) {
+        console.error("Camera Init Error:", err);
+      }
+    }
+
+    function setupAudio(stream) {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(stream);
+        audioAnalyser = audioContext.createAnalyser();
+        audioAnalyser.fftSize = 256;
+        source.connect(audioAnalyser);
+        audioDataArray = new Uint8Array(audioAnalyser.frequencyBinCount);
+
+        function sampleAudio() {
+          if (audioAnalyser) {
+            audioAnalyser.getByteFrequencyData(audioDataArray);
+            let sum = 0;
+            const count = Math.floor(audioDataArray.length * 0.7);
+            for (let i = 0; i < count; i++) sum += audioDataArray[i];
+            currentAudioVolume = sum / count;
+
+            if (noiseSamples.length < 30) {
+              noiseSamples.push(currentAudioVolume);
+              if (noiseSamples.length === 30) {
+                ambientNoiseFloor = Math.max(5, (noiseSamples.reduce((a, b) => a + b, 0) / 30) + 4);
+              }
+            }
+          }
+          requestAnimationFrame(sampleAudio);
+        }
+        sampleAudio();
+      } catch (e) {}
+    }
+
+    // =========================================================================
+    // 3. MOBILE-OPTIMIZED PROCTORING LOOP (LIGHTWEIGHT & DECOUPLED)
+    // =========================================================================
+    function startProctoringLoop() {
+      const ctx = pipOverlay.getContext('2d');
+      // inputSize 256 maintains low CPU/battery consumption on mobile devices
+      const detectorOptions = new faceapi.TinyFaceDetectorOptions({ inputSize: 256, scoreThreshold: 0.35 });
+
+      setInterval(async () => {
+        if (isTerminated) return;
+
+        const detections = await faceapi.detectAllFaces(pipVideo, detectorOptions)
+          .withFaceLandmarks();
+
+        ctx.clearRect(0, 0, pipOverlay.width, pipOverlay.height);
+
+        let hasViolation = false;
+
+        // 1. Multiple Faces
+        if (detections.length > 1) {
+          hasViolation = true;
+          setCamStatus("ALERT", "#ef4444");
+          triggerStrike("MULTIPLE_FACES", "Multiple faces detected on mobile camera!");
+        } 
+        // 2. No Face Detected
+        else if (detections.length === 0) {
+          noFaceCounter++;
+          if (noFaceCounter > 25) {
+            hasViolation = true;
+            setCamStatus("AWAY", "#f59e0b");
+            triggerStrike("NO_FACE", "No face visible! Keep device facing you.");
+          }
+        } 
+        // 3. Single Candidate
+        else {
+          noFaceCounter = 0;
+          const det = detections[0];
+          const landmarks = det.landmarks;
+          const p = landmarks.positions;
+
+          // Head Velocity
+          const nose = p[30];
+          let headSpeed = 0;
+          if (prevNosePosition) {
+            headSpeed = Math.hypot(nose.x - prevNosePosition.x, nose.y - prevNosePosition.y);
+          }
+          prevNosePosition = { x: nose.x, y: nose.y };
+
+          const pose = analyzeHeadPose(landmarks);
+
+          // Lap / Book Looking Down
+          if (pose.isLookingDown) {
+            lookingDownFrames++;
+            if (lookingDownFrames >= 30) {
+              hasViolation = true;
+              setCamStatus("LAP GAZE", "#ef4444");
+              triggerStrike("LOOKING_DOWN", "Looking down at lap/notes detected!");
+              lookingDownFrames = 0;
+            }
+          } else {
+            lookingDownFrames = Math.max(0, lookingDownFrames - 2);
+          }
+
+          // Looking Away Sideways
+          if (pose.isLookingAway) {
+            lookingAwayFrames++;
+            if (lookingAwayFrames >= 32) {
+              hasViolation = true;
+              setCamStatus("LOOK AWAY", "#ef4444");
+              triggerStrike("LOOKING_AWAY", "Looking away from device screen!");
+              lookingAwayFrames = 0;
+            }
+          } else {
+            lookingAwayFrames = Math.max(0, lookingAwayFrames - 2);
+          }
+
+          // Decoupled Speech Detection (Disabled during head turn/tilt)
+          const isTurningOrTilted = pose.isLookingAway || pose.isLookingDown || (headSpeed > 4.5);
+
+          if (isTurningOrTilted) {
+            sustainedSpeechFrames = Math.max(0, sustainedSpeechFrames - 2);
+            marHistory.length = 0;
+          } else {
+            const isSpeaking = detectTrueSpeech(landmarks, currentAudioVolume);
+            if (isSpeaking) {
+              sustainedSpeechFrames++;
+              if (sustainedSpeechFrames >= 5) {
+                hasViolation = true;
+                setCamStatus("TALKING", "#ef4444");
+                triggerStrike("TALKING", "Speech or whisper detected!");
+                sustainedSpeechFrames = 0;
+              }
+            } else {
+              sustainedSpeechFrames = Math.max(0, sustainedSpeechFrames - 1);
+            }
+          }
+
+          if (!hasViolation) {
+            setCamStatus("REC", "#10b981");
+          }
+
+          // Subtle WhatsApp-style bounding frame inside floating bubble
+          const box = det.detection.box;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = hasViolation ? '#ef4444' : '#10b981';
+          ctx.strokeRect(box.x, box.y, box.width, box.height);
+        }
+      }, 130);
+    }
+
+    function setCamStatus(text, color) {
+      camStatusText.innerText = text;
+      camStatusDot.style.backgroundColor = color;
+      floatingCam.style.borderColor = color;
+    }
+
+    // Accurate Perspective-Invariant Mouth Aspect Ratio (MAR)
+    function detectTrueSpeech(landmarks, currentAudio) {
+      const p = landmarks.positions;
+      const mouthWidth = Math.hypot(p[48].x - p[54].x, p[48].y - p[54].y);
+      if (mouthWidth < 12) return false;
+
+      const innerGap = Math.hypot(p[62].x - p[66].x, p[62].y - p[66].y);
+      const outerGap = Math.hypot(p[51].x - p[57].x, p[51].y - p[57].y);
+      const currentMAR = (innerGap * 1.6 + outerGap) / mouthWidth;
+
+      marHistory.push(currentMAR);
+      if (marHistory.length > 14) marHistory.shift();
+      if (marHistory.length < 8) return false;
+
+      let sum = 0;
+      marHistory.forEach(v => sum += v);
+      const avgMAR = sum / marHistory.length;
+      const variance = marHistory.reduce((acc, v) => acc + Math.pow(v - avgMAR, 2), 0) / marHistory.length;
+      const stdDev = Math.sqrt(variance);
+
+      const maxMAR = Math.max(...marHistory);
+      const minMAR = Math.min(...marHistory);
+      const oscillation = maxMAR - minMAR;
+
+      const hasVoiceAcoustics = currentAudio > (ambientNoiseFloor + 8);
+      const hasLoudAcoustics = currentAudio > (ambientNoiseFloor + 18);
+
+      if (hasVoiceAcoustics && oscillation > 0.045 && stdDev > 0.015) return true;
+      if (hasLoudAcoustics && oscillation > 0.03) return true;
+      if (oscillation > 0.12 && maxMAR > 0.45 && stdDev > 0.035) return true;
+
+      return false;
+    }
+
+    function analyzeHeadPose(landmarks) {
+      const p = landmarks.positions;
+      const eyeCenterY = (p[36].y + p[45].y) / 2;
+      const noseTipY = p[30].y;
+      const chinY = p[8].y;
+
+      const upperFace = Math.max(1, noseTipY - eyeCenterY);
+      const lowerFace = Math.max(1, chinY - noseTipY);
+      const currentPitchRatio = upperFace / lowerFace;
+
+      const leftJawX = p[0].x;
+      const rightJawX = p[16].x;
+      const noseX = p[30].x;
+      const currentYaw = (noseX - leftJawX) / Math.max(1, (rightJawX - leftJawX));
+
+      if (baselinePitch === null) {
+        calibrationFrames.push(currentPitchRatio);
+        if (calibrationFrames.length >= 20) {
+          baselinePitch = calibrationFrames.reduce((a, b) => a + b, 0) / calibrationFrames.length;
+        }
+        return { isLookingDown: false, isLookingAway: false };
+      }
+
+      const isLookingDown = (currentPitchRatio - baselinePitch > 0.33) || (currentPitchRatio > 1.38);
+      const isLookingAway = currentYaw < 0.28 || currentYaw > 0.72;
+
+      return { isLookingDown, isLookingAway };
+    }
+
+    // Strike & Termination Engine
+    function triggerStrike(code, message) {
+      const now = Date.now();
+      if (now - lastViolationTime < 3500) return;
+      lastViolationTime = now;
+
+      strikes++;
+      const timeStr = new Date().toLocaleTimeString();
+      incidentList.push({ code, message, time: timeStr });
+      localStorage.setItem('exam_violations', JSON.stringify(incidentList));
+
+      strikeBadge.innerText = `${strikes}/${MAX_STRIKES}`;
+      strikeBadge.className = strikes >= 2 ? "text-xs font-black text-rose-500 font-mono animate-pulse" : "text-xs font-black text-amber-400 font-mono";
+
+      if (strikes >= MAX_STRIKES) {
+        terminateExam();
+      } else {
+        showViolationModal(message);
+      }
+    }
+
+    function showViolationModal(msg) {
+      violationText.innerText = msg;
+      violationModal.classList.remove('hidden');
+    }
+
+    function dismissViolationModal() {
+      violationModal.classList.add('hidden');
+    }
+
+    function terminateExam() {
+      isTerminated = true;
+      violationModal.classList.add('hidden');
+      blackoutCurtain.style.display = 'none';
+      floatingCam.style.display = 'none';
+      terminationScreen.classList.remove('hidden');
+
+      terminationReasons.innerHTML = incidentList.map(item => `
+        <div class="flex justify-between border-b border-slate-800 pb-1">
+          <span class="text-rose-400 font-bold">[${item.code}]</span>
+          <span>${item.message}</span>
+          <span class="text-slate-500">${item.time}</span>
+        </div>
+      `).join('');
+    }
+
+    // Countdown Timer (45 Mins)
+    let totalSecs = 45 * 60;
+    setInterval(() => {
+      if (isTerminated || totalSecs <= 0) return;
+      totalSecs--;
+      const m = String(Math.floor(totalSecs / 60)).padStart(2, '0');
+      const s = String(totalSecs % 60).padStart(2, '0');
+      document.getElementById('exam-timer').innerText = `${m}:${s}`;
+    }, 1000);
+
+    window.onload = initMobileAI;
+  </script>
+</body>
+</html>
